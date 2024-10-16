@@ -18,6 +18,9 @@ fn main() {
     let _ = shutdown_app.send(());
   });
 
+  let x = Box::new(42);
+  Box::leak(x);
+
   // Returns after shutdown signal
   app.run("0.0.0.0:8080").unwrap();
 
