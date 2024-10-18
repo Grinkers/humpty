@@ -11,7 +11,6 @@ use crate::krauss::wildcard_match;
 use crate::monitor::event::{Event, EventType};
 use crate::monitor::MonitorConfig;
 use crate::route::{Route, RouteHandler, SubApp};
-use crate::stream::Stream;
 use crate::thread::pool::ThreadPool;
 
 use std::io::Write;
@@ -38,6 +37,7 @@ pub struct App {
 pub type ConnectionCondition = fn(&mut TcpStream) -> bool;
 
 pub use crate::handler_traits::*;
+use crate::stream::{ConnectionStream, IntoConnectionStream};
 
 /// Represents a function able to handle an error.
 /// The first parameter of type `Option<Request>` will be `Some` if the request could be parsed.
@@ -130,7 +130,7 @@ impl App {
                 );
 
                 client_handler(
-                  Stream::Tcp(stream),
+                  stream,
                   cloned_subapps,
                   cloned_default_subapp,
                   cloned_error_handler,
@@ -273,37 +273,38 @@ impl App {
 /// Handles a connection with a client.
 /// The connection will be opened upon the first request and closed as soon as a request is
 ///   received without the `Connection: Keep-Alive` header.
-fn client_handler(
-  mut stream: Stream,
+fn client_handler<T: IntoConnectionStream>(
+  stream: T,
   subapps: Arc<Vec<SubApp>>,
   default_subapp: Arc<SubApp>,
   error_handler: Arc<ErrorHandler>,
   monitor: MonitorConfig,
   timeout: Option<Duration>,
 ) {
+  let mut stream = stream.into_connection_stream();
+
   let addr = if let Ok(addr) = stream.peer_addr() {
     addr
   } else {
     monitor.send(EventType::StreamDisconnectedWhileWaiting);
-
     return;
   };
 
   loop {
     // Parses the request from the stream
     let request = match timeout {
-      Some(timeout) => Request::from_stream_with_timeout(&mut stream, addr, timeout),
-      None => Request::from_stream(&mut stream, addr),
+      Some(timeout) => Request::from_stream_with_timeout(stream.as_ref(), addr.clone(), timeout),
+      None => Request::from_stream(stream.as_ref(), addr.clone()),
     };
 
     // If the request is valid an is a WebSocket request, call the corresponding handler
     if let Ok(req) = &request {
       if req.headers.get(&HeaderType::Upgrade) == Some("websocket") {
-        monitor.send(Event::new(EventType::WebsocketConnectionRequested).with_peer(addr));
+        monitor.send(Event::new(EventType::WebsocketConnectionRequested).with_peer(addr.clone()));
 
-        call_websocket_handler(req, &subapps, &default_subapp, stream);
+        call_websocket_handler(req, &subapps, &default_subapp, stream.as_ref());
 
-        monitor.send(Event::new(EventType::WebsocketConnectionClosed).with_peer(addr));
+        monitor.send(Event::new(EventType::WebsocketConnectionClosed).with_peer(addr.clone()));
         break;
       }
     }
@@ -408,8 +409,17 @@ fn client_handler(
     let response_bytes: Vec<u8> = response.into();
 
     if let Err(e) = stream.write_all(&response_bytes) {
-      monitor
-        .send(Event::new(EventType::RequestServedError).with_peer(addr).with_info(e.to_string()));
+      monitor.send(
+        Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(e.to_string()),
+      );
+
+      break;
+    };
+
+    if let Err(e) = stream.flush() {
+      monitor.send(
+        Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(e.to_string()),
+      );
 
       break;
     };
@@ -419,16 +429,18 @@ fn client_handler(
     match status {
       StatusCode::OK => monitor.send(
         Event::new(EventType::RequestServedSuccess)
-          .with_peer(addr)
+          .with_peer(addr.clone())
           .with_info(format!("200 OK {}", request.unwrap().uri)),
       ),
       StatusCode::RequestTimeout => monitor.send(
-        Event::new(EventType::RequestTimeout).with_peer(addr).with_info("408 Request Timeout"),
+        Event::new(EventType::RequestTimeout)
+          .with_peer(addr.clone())
+          .with_info("408 Request Timeout"),
       ),
       e => {
         if let Ok(request) = request {
           monitor.send(
-            Event::new(EventType::RequestServedError).with_peer(addr).with_info(format!(
+            Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(format!(
               "{} {} {}",
               u16::from(e),
               status_str,
@@ -437,7 +449,7 @@ fn client_handler(
           )
         } else {
           monitor.send(
-            Event::new(EventType::RequestServedError).with_peer(addr).with_info(format!(
+            Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(format!(
               "{} {}",
               u16::from(e),
               status_str
@@ -452,10 +464,10 @@ fn client_handler(
       break;
     }
 
-    monitor.send(Event::new(EventType::KeepAliveRespected).with_peer(addr));
+    monitor.send(Event::new(EventType::KeepAliveRespected).with_peer(addr.clone()));
   }
 
-  monitor.send(Event::new(EventType::ConnectionClosed).with_peer(addr));
+  monitor.send(Event::new(EventType::ConnectionClosed).with_peer(addr.clone()));
 }
 
 /// Gets the correct handler for the given request.
@@ -494,7 +506,7 @@ fn call_websocket_handler(
   request: &Request,
   subapps: &[SubApp],
   default_subapp: &SubApp,
-  stream: Stream,
+  stream: &dyn ConnectionStream,
 ) {
   // Iterate over the sub-apps and find the one which matches the host
   if let Some(host) = request.headers.get(&HeaderType::Host) {
@@ -505,7 +517,7 @@ fn call_websocket_handler(
         .iter() // Iterate over the routes
         .find(|route| route.route.route_matches(&request.uri))
       {
-        handler.handler.serve(request.clone(), stream);
+        handler.handler.serve(request.clone(), stream.new_ref());
         return;
       }
     }
@@ -515,7 +527,7 @@ fn call_websocket_handler(
   if let Some(handler) =
     default_subapp.websocket_routes.iter().find(|route| route.route.route_matches(&request.uri))
   {
-    handler.handler.serve(request.clone(), stream)
+    handler.handler.serve(request.clone(), stream.new_ref())
   }
 }
 

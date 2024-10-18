@@ -1,14 +1,14 @@
 //! Provides functionality for working with a WebSocket stream.
 
-use crate::stream::Stream;
+use std::io;
 
 use crate::websocket::error::WebsocketError;
 use crate::websocket::frame::{Frame, Opcode};
 use crate::websocket::message::Message;
 use crate::websocket::restion::Restion;
 
+use crate::stream::ConnectionStream;
 use std::io::{Read, Write};
-use std::net::SocketAddr;
 use std::time::Instant;
 
 /// Represents a WebSocket stream.
@@ -18,7 +18,7 @@ use std::time::Instant;
 /// The stream also implements the `Read` and `Write` traits to help with compatibility with
 ///   other crates. These simply wrap and unwrap the bytes in WebSocket frames.
 pub struct WebsocketStream {
-  pub(crate) stream: Stream,
+  pub(crate) stream: Box<dyn ConnectionStream>,
   pub(crate) closed: bool,
   pub(crate) last_pong: Instant,
 }
@@ -27,7 +27,7 @@ impl WebsocketStream {
   /// Creates a new `WebsocketStream` wrapping an underlying Humpty stream.
   ///
   /// When the `WebsocketStream` is dropped, a close frame will be sent to the client.
-  pub fn new(stream: Stream) -> Self {
+  pub fn new(stream: Box<dyn ConnectionStream>) -> Self {
     Self { stream, closed: false, last_pong: Instant::now() }
   }
 
@@ -69,16 +69,17 @@ impl WebsocketStream {
   /// ## Warning
   /// This function does not check that the frame is valid.
   pub(crate) fn send_raw(&mut self, bytes: impl AsRef<[u8]>) -> Result<(), WebsocketError> {
-    self.stream.write_all(bytes.as_ref()).map_err(|_| WebsocketError::WriteError)
+    self.stream.write_all(bytes.as_ref()).map_err(|_| WebsocketError::WriteError)?;
+    self.stream.flush().map_err(|_| WebsocketError::WriteError)
   }
 
   /// Attempts to get the peer address of this stream.
-  pub fn peer_addr(&self) -> Result<SocketAddr, std::io::Error> {
+  pub fn peer_addr(&self) -> io::Result<String> {
     self.stream.peer_addr()
   }
 
   /// Returns a mutable reference to the underlying stream.
-  pub fn inner(&mut self) -> &mut Stream {
+  pub fn inner(&mut self) -> &mut Box<dyn ConnectionStream> {
     &mut self.stream
   }
 }

@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// This is wrapped in `websocket_handler` to manage the handshake for us using the `humpty_ws` crate.
 fn echo_handler(mut stream: WebsocketStream) {
   // Get the address of the client.
-  let addr = stream.inner().peer_addr().unwrap().ip().to_string();
+  let addr = stream.inner().peer_addr().unwrap();
 
   println!("New connection from {}", addr);
 

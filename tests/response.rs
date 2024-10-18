@@ -13,7 +13,7 @@ use std::time::Duration;
 #[test]
 fn test_response() {
   let response = Response::empty(StatusCode::OK)
-    .with_bytes(b"<body>test</body>")
+    .with_bytes(b"<body>test</body>\r\n")
     .with_header(HeaderType::ContentType, "text/html")
     .with_header(HeaderType::ContentLanguage, "en-GB")
     .with_header(HeaderType::Date, "Thu, 1 Jan 1970 00:00:00 GMT"); // this would never be manually set in prod, but is obviously required for testing
@@ -29,7 +29,7 @@ fn test_response() {
 #[test]
 fn test_cookie_response() {
   let response = Response::empty(StatusCode::OK)
-    .with_bytes(b"Hello, world!")
+    .with_bytes(b"Hello, world!\r\n")
     .with_cookie(
       SetCookie::new("X-Example-Cookie", "example-value")
         .with_path("/")

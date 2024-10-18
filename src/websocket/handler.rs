@@ -8,8 +8,8 @@ use crate::websocket::MAGIC_STRING;
 
 use crate::http::headers::HeaderType;
 use crate::http::{Request, Response, StatusCode};
-use crate::stream::Stream;
 
+use crate::stream::ConnectionStream;
 use std::io::Write;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -40,11 +40,11 @@ impl<T> WebsocketHandler for T where T: Fn(WebsocketStream) + Send + Sync {}
 ///     stream.send(Message::new("Hello, World!")).unwrap();
 /// }
 /// ```
-pub fn websocket_handler<T>(handler: T) -> impl Fn(Request, Stream)
+pub fn websocket_handler<T>(handler: T) -> impl Fn(Request, Box<dyn ConnectionStream>)
 where
   T: WebsocketHandler,
 {
-  move |request: Request, mut stream: Stream| {
+  move |request: Request, mut stream: Box<dyn ConnectionStream>| {
     if handshake(request, &mut stream).is_ok() {
       handler(WebsocketStream::new(stream));
     }
@@ -90,8 +90,8 @@ where
 /// ```
 pub fn async_websocket_handler(
   hook: Arc<Mutex<Sender<WebsocketStream>>>,
-) -> impl Fn(Request, Stream) {
-  move |request: Request, mut stream: Stream| {
+) -> impl Fn(Request, Box<dyn ConnectionStream>) {
+  move |request: Request, mut stream: Box<dyn ConnectionStream>| {
     if handshake(request, &mut stream).is_ok() {
       hook.lock().unwrap().send(WebsocketStream::new(stream)).ok();
     }
@@ -99,7 +99,10 @@ pub fn async_websocket_handler(
 }
 
 /// Performs the WebSocket handshake.
-fn handshake(request: Request, stream: &mut Stream) -> Result<(), WebsocketError> {
+fn handshake(
+  request: Request,
+  stream: &mut Box<dyn ConnectionStream>,
+) -> Result<(), WebsocketError> {
   // Get the handshake key header
   let handshake_key =
     request.headers.get("Sec-WebSocket-Key").ok_or(WebsocketError::HandshakeError)?;
@@ -116,6 +119,7 @@ fn handshake(request: Request, stream: &mut Stream) -> Result<(), WebsocketError
   // Transmit the handshake response
   let response_bytes: Vec<u8> = response.into();
   stream.write_all(&response_bytes).map_err(|_| WebsocketError::WriteError)?;
+  stream.flush().map_err(|_| WebsocketError::WriteError)?;
 
   Ok(())
 }

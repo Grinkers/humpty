@@ -33,7 +33,7 @@ pub struct AsyncWebsocketApp {
   /// Ping configuration.
   heartbeat: Option<Heartbeat>,
   /// A hashmap with the addresses as the keys and the actual streams as the values.
-  streams: HashMap<SocketAddr, WebsocketStream>,
+  streams: HashMap<String, WebsocketStream>,
   /// A receiver which is sent new streams to add to the hashmap.
   incoming_streams: Receiver<WebsocketStream>,
   /// A receiver which receives messages from handler threads to forward to clients.
@@ -55,7 +55,7 @@ pub struct AsyncWebsocketApp {
 /// This is what is passed to the handler in place of the actual stream. It is able to send
 ///   messages back to the stream using the sender and the stream is identified by its address.
 pub struct AsyncStream {
-  addr: SocketAddr,
+  addr: String,
   sender: Sender<OutgoingMessage>,
   connected: bool,
 }
@@ -66,7 +66,7 @@ pub struct AsyncSender(Sender<OutgoingMessage>);
 /// Represents a message to be sent from the server to a client.
 pub enum OutgoingMessage {
   /// A message to be sent to a specific client.
-  Message(SocketAddr, Message),
+  Message(String, Message),
   /// A message to be sent to every connected client.
   Broadcast(Message),
 }
@@ -315,7 +315,7 @@ impl AsyncWebsocketApp {
         }
       }
 
-      let keys: Vec<SocketAddr> = self.streams.keys().copied().collect();
+      let keys: Vec<String> = self.streams.keys().cloned().collect();
 
       // Calculate whether a ping should be sent this iteration.
       let will_ping = self
@@ -340,7 +340,7 @@ impl AsyncWebsocketApp {
           match stream.recv_nonblocking() {
             Restion::Ok(message) => {
               if let Some(handler) = &message_handler {
-                let async_stream = AsyncStream::new(addr, self.message_sender.clone());
+                let async_stream = AsyncStream::new(addr.clone(), self.message_sender.clone());
 
                 let cloned_handler = handler.clone();
 
@@ -349,7 +349,8 @@ impl AsyncWebsocketApp {
             }
             Restion::Err(_) => {
               if let Some(handler) = &disconnect_handler {
-                let async_stream = AsyncStream::disconnected(addr, self.message_sender.clone());
+                let async_stream =
+                  AsyncStream::disconnected(addr.clone(), self.message_sender.clone());
 
                 let cloned_handler = handler.clone();
 
@@ -368,7 +369,8 @@ impl AsyncWebsocketApp {
           if let Some(ping) = &self.heartbeat {
             if stream.last_pong.elapsed() >= ping.timeout {
               if let Some(handler) = &disconnect_handler {
-                let async_stream = AsyncStream::disconnected(addr, self.message_sender.clone());
+                let async_stream =
+                  AsyncStream::disconnected(addr.clone(), self.message_sender.clone());
 
                 let cloned_handler = handler.clone();
 
@@ -392,7 +394,7 @@ impl AsyncWebsocketApp {
         self.incoming_streams.try_iter().filter_map(|s| s.peer_addr().map(|a| (a, s)).ok())
       {
         if let Some(handler) = &connect_handler {
-          let async_stream = AsyncStream::new(addr, self.message_sender.clone());
+          let async_stream = AsyncStream::new(addr.clone(), self.message_sender.clone());
 
           let cloned_handler = handler.clone();
 
@@ -438,20 +440,20 @@ impl AsyncWebsocketApp {
 
 impl AsyncStream {
   /// Create a new asynchronous stream.
-  pub fn new(addr: SocketAddr, sender: Sender<OutgoingMessage>) -> Self {
+  pub fn new(addr: String, sender: Sender<OutgoingMessage>) -> Self {
     Self { addr, sender, connected: true }
   }
 
   /// Create a new disconnected asynchronous stream.
   /// This is used for getting the address of a disconnected stream.
-  pub fn disconnected(addr: SocketAddr, sender: Sender<OutgoingMessage>) -> Self {
+  pub fn disconnected(addr: String, sender: Sender<OutgoingMessage>) -> Self {
     Self { addr, sender, connected: false }
   }
 
   /// Send a message to the client.
   pub fn send(&self, message: Message) {
     assert!(self.connected);
-    self.sender.send(OutgoingMessage::Message(self.addr, message)).ok();
+    self.sender.send(OutgoingMessage::Message(self.addr.clone(), message)).ok();
   }
 
   /// Broadcast a message to all connected clients.
@@ -460,14 +462,14 @@ impl AsyncStream {
   }
 
   /// Get the address of the stream.
-  pub fn peer_addr(&self) -> SocketAddr {
-    self.addr
+  pub fn peer_addr(&self) -> String {
+    self.addr.clone()
   }
 }
 
 impl AsyncSender {
   /// Send a message to the client identified by the socket address.
-  pub fn send(&self, address: SocketAddr, message: Message) {
+  pub fn send(&self, address: String, message: Message) {
     self.0.send(OutgoingMessage::Message(address, message)).ok();
   }
 
