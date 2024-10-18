@@ -2,6 +2,7 @@
 name = "humpty"
 version = "0.1.0"
 edition = "2021"
+authors = ["Alexander Schuetz <aschuetz@protonmail.com>", "Kevin Nakamura <grinkers@grinkers.net>"]
 license = "MIT"
 homepage = "https://github.com/Grinkers/humpty"
 repository = "https://github.com/Grinkers/humpty"
