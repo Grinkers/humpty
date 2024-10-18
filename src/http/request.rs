@@ -5,11 +5,10 @@ use crate::http::cookie::Cookie;
 use crate::http::headers::{HeaderType, Headers};
 use crate::http::method::Method;
 
+use crate::http::request_body::RequestBody;
+use crate::stream::ConnectionStream;
 use std::error::Error;
-use std::net::SocketAddr;
-
-use crate::stream::Stream;
-use std::io::{BufRead, BufReader, ErrorKind, Read};
+use std::io::ErrorKind;
 use std::time::Duration;
 
 /// Represents a request to the server.
@@ -27,7 +26,7 @@ pub struct Request {
   /// A list of headers included in the request.
   pub headers: Headers,
   /// The request body, if supplied.
-  pub content: Option<Vec<u8>>,
+  pub content: Option<RequestBody>,
   /// The address from which the request came
   pub address: Address,
 }
@@ -65,10 +64,8 @@ impl Error for RequestError {}
 
 impl Request {
   /// Attempts to read and parse one HTTP request from the given reader.
-  pub fn from_stream<T>(stream: &mut T, address: SocketAddr) -> Result<Self, RequestError>
-  where
-    T: Read,
-  {
+  pub fn from_stream(stream: &dyn ConnectionStream, address: String) -> Result<Self, RequestError> {
+    //TODO wtf? Why poke the connection.
     let mut first_buf: [u8; 1] = [0; 1];
     stream.read_exact(&mut first_buf).map_err(|_| RequestError::Disconnected)?;
 
@@ -77,20 +74,22 @@ impl Request {
 
   /// Attempts to read and parse one HTTP request from the given stream, timing out after the timeout.
   pub fn from_stream_with_timeout(
-    stream: &mut Stream,
-    address: SocketAddr,
+    stream: &dyn ConnectionStream,
+    address: String,
     timeout: Duration,
   ) -> Result<Self, RequestError> {
-    stream.set_timeout(Some(timeout)).map_err(|_| RequestError::Stream)?;
+    stream.set_read_timeout(Some(timeout)).map_err(|_| RequestError::Stream)?;
 
+    //TODO wtf? Why poke the connection.
     let mut first_buf: [u8; 1] = [0; 1];
+
     stream.read_exact(&mut first_buf).map_err(|e| match e.kind() {
       ErrorKind::TimedOut => RequestError::Timeout,
       ErrorKind::WouldBlock => RequestError::Timeout,
       _ => RequestError::Disconnected,
     })?;
 
-    stream.set_timeout(None).map_err(|_| RequestError::Stream)?;
+    stream.set_read_timeout(None).map_err(|_| RequestError::Stream)?;
 
     Self::from_stream_inner(stream, address, first_buf[0])
   }
@@ -118,17 +117,13 @@ impl Request {
   }
 
   /// Attempts to read and parse one HTTP request from the given reader.
-  fn from_stream_inner<T>(
-    stream: &mut T,
-    address: SocketAddr,
+  fn from_stream_inner(
+    stream: &dyn ConnectionStream,
+    address: String,
     first_byte: u8,
-  ) -> Result<Self, RequestError>
-  where
-    T: Read,
-  {
-    let mut reader = BufReader::new(stream);
+  ) -> Result<Self, RequestError> {
     let mut start_line_buf: Vec<u8> = Vec::with_capacity(256);
-    reader.read_until(0xA, &mut start_line_buf).map_err(|_| RequestError::Stream)?;
+    stream.read_until(0xA, &mut start_line_buf).map_err(|_| RequestError::Stream)?;
 
     start_line_buf.insert(0, first_byte);
 
@@ -154,7 +149,7 @@ impl Request {
 
     loop {
       let mut line_buf: Vec<u8> = Vec::with_capacity(256);
-      reader.read_until(0xA, &mut line_buf).map_err(|_| RequestError::Stream)?;
+      stream.read_until(0xA, &mut line_buf).map_err(|_| RequestError::Stream)?;
       let line = std::str::from_utf8(&line_buf).map_err(|_| RequestError::Request)?;
 
       if line == "\r\n" {
@@ -172,15 +167,22 @@ impl Request {
 
     let address = Address::from_headers(&headers, address).map_err(|_| RequestError::Request)?;
 
-    if let Some(content_length) = headers.get(&HeaderType::ContentLength) {
-      let content_length: usize = content_length.parse().map_err(|_| RequestError::Request)?;
-      let mut content_buf: Vec<u8> = vec![0u8; content_length];
-      reader.read_exact(&mut content_buf).map_err(|_| RequestError::Stream)?;
-
-      Ok(Self { method, uri, query, version, headers, content: Some(content_buf), address })
-    } else {
-      Ok(Self { method, uri, query, version, headers, content: None, address })
+    match headers.get(&HeaderType::TransferEncoding) {
+      Some("chunked") => {
+        let body = RequestBody::new_chunked(stream.new_ref_read());
+        return Ok(Self { method, uri, query, version, headers, content: Some(body), address });
+      }
+      Some(_other) => return Err(RequestError::Disconnected), //TODO
+      None => {}
     }
+
+    if let Some(content_length) = headers.get(&HeaderType::ContentLength) {
+      let content_length: u64 = content_length.parse().map_err(|_| RequestError::Request)?;
+      let body = RequestBody::new_with_content_length(stream.new_ref_read(), content_length);
+      return Ok(Self { method, uri, query, version, headers, content: Some(body), address });
+    }
+
+    Ok(Self { method, uri, query, version, headers, content: None, address })
   }
 }
 
@@ -192,31 +194,33 @@ fn safe_assert(condition: bool) -> Result<(), RequestError> {
   }
 }
 
-impl From<Request> for Vec<u8> {
-  fn from(req: Request) -> Self {
-    let start_line = if req.query.is_empty() {
-      format!("{} {} {}", req.method, req.uri, req.version)
-    } else {
-      format!("{} {}?{} {}", req.method, req.uri, req.query, req.version)
-    };
-
-    let headers = req
-      .headers
-      .iter()
-      .map(|h| format!("{}: {}", h.name, h.value))
-      .collect::<Vec<String>>()
-      .join("\r\n");
-
-    let mut bytes: Vec<u8> = Vec::new();
-    bytes.extend(start_line.as_bytes());
-    bytes.extend(b"\r\n");
-    bytes.extend(headers.as_bytes());
-    bytes.extend(b"\r\n\r\n");
-
-    if let Some(content) = req.content {
-      bytes.extend(content);
-    }
-
-    bytes
-  }
-}
+//impl From<Request> for Vec<u8> {
+//  fn from(req: Request) -> Self {
+//    let start_line = if req.query.is_empty() {
+//      format!("{} {} {}", req.method, req.uri, req.version)
+//    } else {
+//      format!("{} {}?{} {}", req.method, req.uri, req.query, req.version)
+//    };
+//
+//    let headers = req
+//      .headers
+//      .iter()
+//      .map(|h| format!("{}: {}", h.name, h.value))
+//      .collect::<Vec<String>>()
+//      .join("\r\n");
+//
+//    let mut bytes: Vec<u8> = Vec::new();
+//    bytes.extend(start_line.as_bytes());
+//    bytes.extend(b"\r\n");
+//    bytes.extend(headers.as_bytes());
+//    bytes.extend(b"\r\n\r\n");
+//
+//
+//    if let Some(_content) = req.content {
+//      //TODO this entire From impl makes no sense outside of debugging. We should remove it.
+//      todo!("Remove this")
+//    }
+//
+//    bytes
+//  }
+//}

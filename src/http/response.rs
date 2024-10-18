@@ -223,7 +223,7 @@ impl From<Response> for Vec<u8> {
 
     if !val.body.is_empty() {
       bytes.extend(val.body);
-      bytes.extend(b"\r\n");
+      //bytes.extend(b"\r\n");
     }
 
     bytes

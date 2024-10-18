@@ -12,8 +12,9 @@ mod handler_traits;
 mod krauss;
 mod percent;
 mod route;
-mod stream;
+pub mod stream;
 mod thread;
+mod util;
 
 pub use app::App;
 pub use route::SubApp;

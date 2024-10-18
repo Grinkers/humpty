@@ -1,17 +1,17 @@
 //! Defines traits for handler functions.
 
 use crate::http::{Request, Response};
-use crate::stream::Stream;
+use crate::stream::ConnectionStream;
 
 /// Represents a function able to handle a WebSocket handshake and consequent data frames.
 pub trait WebsocketHandler: Send + Sync {
-  fn serve(&self, request: Request, stream: Stream);
+  fn serve(&self, request: Request, stream: Box<dyn ConnectionStream>);
 }
 impl<F> WebsocketHandler for F
 where
-  F: Fn(Request, Stream) + Send + Sync,
+  F: Fn(Request, Box<dyn ConnectionStream>) + Send + Sync,
 {
-  fn serve(&self, request: Request, stream: Stream) {
+  fn serve(&self, request: Request, stream: Box<dyn ConnectionStream>) {
     self(request, stream)
   }
 }

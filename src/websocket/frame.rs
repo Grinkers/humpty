@@ -1,11 +1,10 @@
 //! Provides an implementation of WebSocket frames as specified in [RFC 6455 Section 5](https://datatracker.ietf.org/doc/html/rfc6455#section-5).
 
-use crate::stream::Stream;
 use crate::websocket::error::WebsocketError;
-use crate::websocket::util::restion::Restion;
 
+use crate::stream::ConnectionStreamRead;
+use crate::websocket::restion::Restion;
 use std::convert::TryFrom;
-use std::io::Read;
 
 /// Represents a frame of WebSocket data.
 /// Follows [Section 5.2 of RFC 6455](https://datatracker.ietf.org/doc/html/rfc6455#section-5.2)
@@ -64,10 +63,7 @@ impl Frame {
   }
 
   /// Attempts to read a frame from the given stream, blocking until the frame is read.
-  pub fn from_stream<T>(mut stream: T) -> Result<Self, WebsocketError>
-  where
-    T: Read,
-  {
+  pub fn from_stream<T: ConnectionStreamRead + ?Sized>(stream: &T) -> Result<Self, WebsocketError> {
     let mut buf: [u8; 2] = [0; 2];
     stream.read_exact(&mut buf).map_err(|_| WebsocketError::ReadError)?;
 
@@ -75,9 +71,13 @@ impl Frame {
   }
 
   /// Attempts to read a frame from the given stream, immediately returning instead of blocking if there is no frame to read.
-  pub fn from_stream_nonblocking(stream: &mut Stream) -> Restion<Self, WebsocketError> {
+
+  #[allow(deprecated)]
+  pub fn from_stream_nonblocking<T: ConnectionStreamRead + ?Sized>(
+    stream: &T,
+  ) -> Restion<Self, WebsocketError> {
     // Set the stream to nonblocking to read the header
-    if stream.set_nonblocking().is_err() {
+    if stream.set_read_non_block(true).is_err() {
       return Restion::Err(WebsocketError::ReadError);
     }
 
@@ -86,7 +86,7 @@ impl Frame {
     let result = stream.read(&mut buf);
 
     // Set the stream to blocking for further reads
-    if stream.set_blocking().is_err() {
+    if stream.set_read_non_block(false).is_err() {
       return Restion::Err(WebsocketError::ReadError);
     }
 
@@ -98,10 +98,10 @@ impl Frame {
     }
   }
 
-  fn from_stream_inner<T>(mut stream: T, mut header: [u8; 2]) -> Result<Self, WebsocketError>
-  where
-    T: Read,
-  {
+  fn from_stream_inner<T: ConnectionStreamRead + ?Sized>(
+    stream: &T,
+    mut header: [u8; 2],
+  ) -> Result<Self, WebsocketError> {
     // Parse header information
     let fin = header[0] & 0x80 != 0;
     let rsv = [header[0] & 0x40 != 0, header[0] & 0x20 != 0, header[0] & 0x10 != 0];
@@ -180,43 +180,65 @@ impl AsRef<[u8]> for Frame {
 #[cfg(test)]
 mod test {
   #![allow(clippy::unusual_byte_groupings)]
+  #![allow(dead_code)]
 
+  use crate::stream::{ConnectionStream, IntoConnectionStream};
   use crate::websocket::frame::{Frame, Opcode};
+  use std::collections::VecDeque;
   use std::io::{Read, Write};
+  use std::sync::{Arc, Mutex};
 
+  #[derive(Debug, Clone)]
   pub struct MockStream {
-    data: Vec<u8>,
-    index: usize,
+    read_data: Arc<Mutex<VecDeque<u8>>>,
+    write_data: Arc<Mutex<Vec<u8>>>,
   }
 
   impl MockStream {
     pub fn with_data(data: Vec<u8>) -> Self {
-      Self { data, index: 0 }
+      Self {
+        read_data: Arc::new(Mutex::new(VecDeque::from_iter(data.iter().cloned()))),
+        write_data: Arc::new(Mutex::new(Vec::new())),
+      }
+    }
+
+    pub fn copy_written_data(&self) -> Vec<u8> {
+      self.write_data.lock().unwrap().clone()
+    }
+  }
+
+  impl IntoConnectionStream for MockStream {
+    fn into_connection_stream(self) -> Box<dyn ConnectionStream> {
+      let cl = self.clone();
+      (Box::new(cl) as Box<dyn Read + Send>, Box::new(self) as Box<dyn Write + Send>)
+        .into_connection_stream()
+    }
+  }
+
+  impl Write for MockStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+      self.write_data.lock().unwrap().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+      Ok(())
     }
   }
 
   impl Read for MockStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-      let initial_index = self.index;
+      let mut bytes_written: usize = 0;
+
       for byte in buf {
-        *byte = self.data[self.index];
-        self.index += 1;
-        if self.index == self.data.len() {
-          break;
+        if let Some(new_byte) = self.read_data.lock().unwrap().pop_front() {
+          *byte = new_byte;
+          bytes_written += 1;
+        } else {
+          return Ok(bytes_written);
         }
       }
 
-      std::io::Result::Ok(self.index - initial_index)
-    }
-  }
-
-  impl Write for MockStream {
-    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-      todo!()
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-      todo!()
+      Ok(bytes_written)
     }
   }
 
@@ -273,8 +295,8 @@ mod test {
     bytes.extend(FRAME_1_BYTES);
     bytes.extend(FRAME_2_BYTES);
 
-    let mut stream = MockStream::with_data(bytes);
-    let frame = Frame::from_stream(&mut stream).unwrap();
+    let stream = MockStream::with_data(bytes);
+    let frame = Frame::from_stream(stream.into_connection_stream().as_ref()).unwrap();
 
     let expected_frame = Frame {
       fin: false,
@@ -291,8 +313,8 @@ mod test {
 
   #[test]
   fn test_continuation_frame() {
-    let mut stream = MockStream::with_data(FRAME_2_BYTES.to_vec());
-    let frame = Frame::from_stream(&mut stream).unwrap();
+    let stream = MockStream::with_data(FRAME_2_BYTES.to_vec());
+    let frame = Frame::from_stream(stream.into_connection_stream().as_ref()).unwrap();
 
     let expected_frame = Frame {
       fin: true,
@@ -309,8 +331,8 @@ mod test {
 
   #[test]
   fn test_standalone_frame() {
-    let mut stream = MockStream::with_data(STANDALONE_FRAME_BYTES.to_vec());
-    let frame = Frame::from_stream(&mut stream).unwrap();
+    let stream = MockStream::with_data(STANDALONE_FRAME_BYTES.to_vec());
+    let frame = Frame::from_stream(stream.into_connection_stream().as_ref()).unwrap();
 
     let expected_frame = Frame {
       fin: true,
@@ -331,8 +353,8 @@ mod test {
     bytes.extend(MEDIUM_FRAME_BYTES);
     bytes.extend(vec![b'x' ^ 0x69; 256]);
 
-    let mut stream = MockStream::with_data(bytes);
-    let frame = Frame::from_stream(&mut stream).unwrap();
+    let stream = MockStream::with_data(bytes);
+    let frame = Frame::from_stream(stream.into_connection_stream().as_ref()).unwrap();
 
     let expected_frame = Frame {
       fin: true,
@@ -353,8 +375,9 @@ mod test {
     bytes.extend(LONG_FRAME_BYTES);
     bytes.extend(vec![b'x' ^ 0x69; 65536]);
 
-    let mut stream = MockStream::with_data(bytes);
-    let frame = Frame::from_stream(&mut stream).unwrap();
+    let stream = MockStream::with_data(bytes);
+
+    let frame = Frame::from_stream(stream.into_connection_stream().as_ref()).unwrap();
 
     let expected_frame = Frame {
       fin: true,

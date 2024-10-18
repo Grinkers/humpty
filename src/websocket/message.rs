@@ -43,7 +43,7 @@ impl Message {
 
     // Keep reading frames until we get the finish frame
     while frames.last().map(|f| !f.fin).unwrap_or(true) {
-      let frame = Frame::from_stream(&mut stream.stream)?;
+      let frame = Frame::from_stream(stream.stream.as_stream_read())?;
 
       // If this is a ping, respond with a pong
       if frame.opcode == Opcode::Ping {
@@ -87,9 +87,9 @@ impl Message {
     // Keep reading frames until we get the finish frame
     while frames.last().map(|f| !f.fin).unwrap_or(true) {
       let frame = if is_first_frame {
-        Frame::from_stream_nonblocking(&mut stream.stream)
+        Frame::from_stream_nonblocking(stream.stream.as_stream_read()) //This is stupid
       } else {
-        Frame::from_stream(&mut stream.stream).into()
+        Frame::from_stream(stream.stream.as_stream_read()).into()
       };
 
       match frame {
