@@ -1,22 +1,10 @@
 //! Provides functionality for handling HTTP status codes.
 
-use std::convert::TryFrom;
+use crate::util::three_digit_to_utf;
 
 /// Represents an HTTP status code.
-/// Can be converted to and from both `u16` and `&str`.
 ///
-/// ## Example
-/// ```
-/// let status = humpty::http::StatusCode::NotFound;
-/// let status2 = humpty::http::StatusCode::try_from(404).unwrap();
-/// assert_eq!(status, status2);
-///
-/// let status_code: u16 = status.into();
-/// let status_name: &str = status.into();
-/// assert_eq!(status_code, 404);
-/// assert_eq!(status_name, "Not Found");
-/// ```
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatusCode {
   /// `100 Continue`: Continue with request.
   Continue,
@@ -85,7 +73,7 @@ pub enum StatusCode {
   /// `417 Expectation Failed`: The expectation given in the `Expect` header could not be met by the server.
   ExpectationFailed,
   /// `500 Internal Server Error`: The server encountered an unexpected error which prevented it from fulfilling the request.
-  InternalError,
+  InternalServerError,
   /// `501 Not Implemented`: The server does not support the functionality required to fulfill the request.
   NotImplemented,
   /// `502 Bad Gateway`: The server, while acting as a gateway or proxy, received an invalid response from the upstream server.
@@ -96,110 +84,111 @@ pub enum StatusCode {
   GatewayTimeout,
   /// `505 HTTP Version Not Supported`: The server does not support the HTTP protocol version used in the request.
   VersionNotSupported,
+
+  /// User defined status code, some applications need non-standard custom status codes.
+  CustomStr(u16, [u8; 3], &'static str),
+  /// User defined status code, some applications need non-standard custom status codes.
+  CustomString(u16, [u8; 3], String),
 }
 
-/// Represents an error with the status code.
-#[derive(PartialEq, Eq, Debug)]
-pub struct StatusCodeError;
+impl StatusCode {
+  /// Creates a custom Status code from a static message and code.
+  /// Codes with more or less than 3 digits or status lines with invalid content will silently turn into
+  /// Internal server error. This method is intended to be called from const code so you
+  /// can put your custom codes into const variables.
+  ///
+  pub const fn from_custom(code: u16, status_line: &'static str) -> Self {
+    //TODO verify status_line doesnt contain funny characters here?
+    if code < 100 || code > 999 {
+      return Self::InternalServerError;
+    }
 
-impl TryFrom<u16> for StatusCode {
-  fn try_from(code: u16) -> Result<Self, StatusCodeError> {
+    Self::CustomStr(code, three_digit_to_utf(code), status_line)
+  }
+
+  /// Creates a custom Status code from a dynamic (possibly heap allocated) message and code.
+  /// # Returns
+  /// None: Codes with more or less than 3 digits or status lines with invalid content
+  ///
+  pub fn from_custom_string<T: ToString>(code: u16, status_line: &T) -> Option<Self> {
+    let status_line = status_line.to_string();
+    //TODO verify status_line doesnt contain funny characters here?
+    if !(100..=999).contains(&code) {
+      return None;
+    }
+
+    if let Some(well_known) = Self::from_well_known_code(code) {
+      if well_known.status_line() == status_line.as_str() {
+        return Some(well_known);
+      }
+    }
+
+    Some(Self::CustomString(code, three_digit_to_utf(code), status_line))
+  }
+
+  /// This fn returns a status code representing a well known code that is specified in the RFC for http.
+  /// If the code is not well known then the fn returns the same value it would return for "500 Internal Server Error"
+  ///
+  pub const fn from_well_known_code_or_500(code: u16) -> Self {
     match code {
-      100 => Ok(StatusCode::Continue),
-      101 => Ok(StatusCode::SwitchingProtocols),
-      200 => Ok(StatusCode::OK),
-      201 => Ok(StatusCode::Created),
-      202 => Ok(StatusCode::Accepted),
-      203 => Ok(StatusCode::NonAuthoritative),
-      204 => Ok(StatusCode::NoContent),
-      205 => Ok(StatusCode::ResetContent),
-      206 => Ok(StatusCode::PartialContent),
-      300 => Ok(StatusCode::MultipleChoices),
-      301 => Ok(StatusCode::MovedPermanently),
-      302 => Ok(StatusCode::Found),
-      303 => Ok(StatusCode::SeeOther),
-      304 => Ok(StatusCode::NotModified),
-      305 => Ok(StatusCode::UseProxy),
-      307 => Ok(StatusCode::TemporaryRedirect),
-      400 => Ok(StatusCode::BadRequest),
-      401 => Ok(StatusCode::Unauthorized),
-      403 => Ok(StatusCode::Forbidden),
-      404 => Ok(StatusCode::NotFound),
-      405 => Ok(StatusCode::MethodNotAllowed),
-      406 => Ok(StatusCode::NotAcceptable),
-      407 => Ok(StatusCode::ProxyAuthenticationRequired),
-      408 => Ok(StatusCode::RequestTimeout),
-      409 => Ok(StatusCode::Conflict),
-      410 => Ok(StatusCode::Gone),
-      411 => Ok(StatusCode::LengthRequired),
-      412 => Ok(StatusCode::PreconditionFailed),
-      413 => Ok(StatusCode::RequestEntityTooLarge),
-      414 => Ok(StatusCode::RequestURITooLong),
-      415 => Ok(StatusCode::UnsupportedMediaType),
-      416 => Ok(StatusCode::RequestedRangeNotSatisfiable),
-      417 => Ok(StatusCode::ExpectationFailed),
-      500 => Ok(StatusCode::InternalError),
-      501 => Ok(StatusCode::NotImplemented),
-      502 => Ok(StatusCode::BadGateway),
-      503 => Ok(StatusCode::ServiceUnavailable),
-      504 => Ok(StatusCode::GatewayTimeout),
-      505 => Ok(StatusCode::VersionNotSupported),
-      _ => Err(StatusCodeError),
+      100 => StatusCode::Continue,
+      101 => StatusCode::SwitchingProtocols,
+      200 => StatusCode::OK,
+      201 => StatusCode::Created,
+      202 => StatusCode::Accepted,
+      203 => StatusCode::NonAuthoritative,
+      204 => StatusCode::NoContent,
+      205 => StatusCode::ResetContent,
+      206 => StatusCode::PartialContent,
+      300 => StatusCode::MultipleChoices,
+      301 => StatusCode::MovedPermanently,
+      302 => StatusCode::Found,
+      303 => StatusCode::SeeOther,
+      304 => StatusCode::NotModified,
+      305 => StatusCode::UseProxy,
+      307 => StatusCode::TemporaryRedirect,
+      400 => StatusCode::BadRequest,
+      401 => StatusCode::Unauthorized,
+      403 => StatusCode::Forbidden,
+      404 => StatusCode::NotFound,
+      405 => StatusCode::MethodNotAllowed,
+      406 => StatusCode::NotAcceptable,
+      407 => StatusCode::ProxyAuthenticationRequired,
+      408 => StatusCode::RequestTimeout,
+      409 => StatusCode::Conflict,
+      410 => StatusCode::Gone,
+      411 => StatusCode::LengthRequired,
+      412 => StatusCode::PreconditionFailed,
+      413 => StatusCode::RequestEntityTooLarge,
+      414 => StatusCode::RequestURITooLong,
+      415 => StatusCode::UnsupportedMediaType,
+      416 => StatusCode::RequestedRangeNotSatisfiable,
+      417 => StatusCode::ExpectationFailed,
+      501 => StatusCode::NotImplemented,
+      502 => StatusCode::BadGateway,
+      503 => StatusCode::ServiceUnavailable,
+      504 => StatusCode::GatewayTimeout,
+      505 => StatusCode::VersionNotSupported,
+      _ => StatusCode::InternalServerError,
     }
   }
 
-  type Error = StatusCodeError;
-}
-
-impl From<StatusCode> for u16 {
-  fn from(val: StatusCode) -> Self {
-    match val {
-      StatusCode::Continue => 100,
-      StatusCode::SwitchingProtocols => 101,
-      StatusCode::OK => 200,
-      StatusCode::Created => 201,
-      StatusCode::Accepted => 202,
-      StatusCode::NonAuthoritative => 203,
-      StatusCode::NoContent => 204,
-      StatusCode::ResetContent => 205,
-      StatusCode::PartialContent => 206,
-      StatusCode::MultipleChoices => 300,
-      StatusCode::MovedPermanently => 301,
-      StatusCode::Found => 302,
-      StatusCode::SeeOther => 303,
-      StatusCode::NotModified => 304,
-      StatusCode::UseProxy => 305,
-      StatusCode::TemporaryRedirect => 307,
-      StatusCode::BadRequest => 400,
-      StatusCode::Unauthorized => 401,
-      StatusCode::Forbidden => 403,
-      StatusCode::NotFound => 404,
-      StatusCode::MethodNotAllowed => 405,
-      StatusCode::NotAcceptable => 406,
-      StatusCode::ProxyAuthenticationRequired => 407,
-      StatusCode::RequestTimeout => 408,
-      StatusCode::Conflict => 409,
-      StatusCode::Gone => 410,
-      StatusCode::LengthRequired => 411,
-      StatusCode::PreconditionFailed => 412,
-      StatusCode::RequestEntityTooLarge => 413,
-      StatusCode::RequestURITooLong => 414,
-      StatusCode::UnsupportedMediaType => 415,
-      StatusCode::RequestedRangeNotSatisfiable => 416,
-      StatusCode::ExpectationFailed => 417,
-      StatusCode::InternalError => 500,
-      StatusCode::NotImplemented => 501,
-      StatusCode::BadGateway => 502,
-      StatusCode::ServiceUnavailable => 503,
-      StatusCode::GatewayTimeout => 504,
-      StatusCode::VersionNotSupported => 505,
+  /// This fn returns a status code representing a well known code that is specified in the RFC for http.
+  /// # Returns
+  /// None: the code was not well known.
+  ///
+  pub fn from_well_known_code(code: u16) -> Option<Self> {
+    let well_known = Self::from_well_known_code_or_500(code);
+    if well_known.code() != code {
+      return None;
     }
-  }
-}
 
-impl From<StatusCode> for &str {
-  fn from(val: StatusCode) -> Self {
-    match val {
+    Some(well_known)
+  }
+
+  /// Returns the status line as a &str
+  pub fn status_line(&self) -> &str {
+    match self {
       StatusCode::Continue => "Continue",
       StatusCode::SwitchingProtocols => "Switching Protocols",
       StatusCode::OK => "OK",
@@ -233,12 +222,108 @@ impl From<StatusCode> for &str {
       StatusCode::UnsupportedMediaType => "Unsupported Media Type",
       StatusCode::RequestedRangeNotSatisfiable => "Requested Range Not Satisfiable",
       StatusCode::ExpectationFailed => "Expectation Failed",
-      StatusCode::InternalError => "Internal Server Error",
+      StatusCode::InternalServerError => "Internal Server Error",
       StatusCode::NotImplemented => "Not Implemented",
       StatusCode::BadGateway => "Bad Gateway",
       StatusCode::ServiceUnavailable => "Service Unavailable",
       StatusCode::GatewayTimeout => "Gateway Timeout",
       StatusCode::VersionNotSupported => "HTTP Version Not Supported",
+      StatusCode::CustomStr(_, _, str) => str,
+      StatusCode::CustomString(_, _, str) => str.as_str(),
+    }
+  }
+
+  /// Returns the 3-digit code as 3 byte utf-8 representation.
+  pub const fn code_as_utf(&self) -> &[u8; 3] {
+    match self {
+      StatusCode::Continue => b"100",
+      StatusCode::SwitchingProtocols => b"101",
+      StatusCode::OK => b"200",
+      StatusCode::Created => b"201",
+      StatusCode::Accepted => b"202",
+      StatusCode::NonAuthoritative => b"203",
+      StatusCode::NoContent => b"204",
+      StatusCode::ResetContent => b"205",
+      StatusCode::PartialContent => b"206",
+      StatusCode::MultipleChoices => b"300",
+      StatusCode::MovedPermanently => b"301",
+      StatusCode::Found => b"302",
+      StatusCode::SeeOther => b"303",
+      StatusCode::NotModified => b"304",
+      StatusCode::UseProxy => b"305",
+      StatusCode::TemporaryRedirect => b"307",
+      StatusCode::BadRequest => b"400",
+      StatusCode::Unauthorized => b"401",
+      StatusCode::Forbidden => b"403",
+      StatusCode::NotFound => b"404",
+      StatusCode::MethodNotAllowed => b"405",
+      StatusCode::NotAcceptable => b"406",
+      StatusCode::ProxyAuthenticationRequired => b"407",
+      StatusCode::RequestTimeout => b"408",
+      StatusCode::Conflict => b"409",
+      StatusCode::Gone => b"410",
+      StatusCode::LengthRequired => b"411",
+      StatusCode::PreconditionFailed => b"412",
+      StatusCode::RequestEntityTooLarge => b"413",
+      StatusCode::RequestURITooLong => b"414",
+      StatusCode::UnsupportedMediaType => b"415",
+      StatusCode::RequestedRangeNotSatisfiable => b"416",
+      StatusCode::ExpectationFailed => b"417",
+      StatusCode::InternalServerError => b"500",
+      StatusCode::NotImplemented => b"501",
+      StatusCode::BadGateway => b"502",
+      StatusCode::ServiceUnavailable => b"503",
+      StatusCode::GatewayTimeout => b"504",
+      StatusCode::VersionNotSupported => b"505",
+      StatusCode::CustomStr(_, code, _) => code,
+      StatusCode::CustomString(_, code, _) => code,
+    }
+  }
+
+  /// Returns the code as u16. This value is guaranteed to be in >= 100 <= 999 range.
+  pub const fn code(&self) -> u16 {
+    match self {
+      StatusCode::Continue => 100,
+      StatusCode::SwitchingProtocols => 101,
+      StatusCode::OK => 200,
+      StatusCode::Created => 201,
+      StatusCode::Accepted => 202,
+      StatusCode::NonAuthoritative => 203,
+      StatusCode::NoContent => 204,
+      StatusCode::ResetContent => 205,
+      StatusCode::PartialContent => 206,
+      StatusCode::MultipleChoices => 300,
+      StatusCode::MovedPermanently => 301,
+      StatusCode::Found => 302,
+      StatusCode::SeeOther => 303,
+      StatusCode::NotModified => 304,
+      StatusCode::UseProxy => 305,
+      StatusCode::TemporaryRedirect => 307,
+      StatusCode::BadRequest => 400,
+      StatusCode::Unauthorized => 401,
+      StatusCode::Forbidden => 403,
+      StatusCode::NotFound => 404,
+      StatusCode::MethodNotAllowed => 405,
+      StatusCode::NotAcceptable => 406,
+      StatusCode::ProxyAuthenticationRequired => 407,
+      StatusCode::RequestTimeout => 408,
+      StatusCode::Conflict => 409,
+      StatusCode::Gone => 410,
+      StatusCode::LengthRequired => 411,
+      StatusCode::PreconditionFailed => 412,
+      StatusCode::RequestEntityTooLarge => 413,
+      StatusCode::RequestURITooLong => 414,
+      StatusCode::UnsupportedMediaType => 415,
+      StatusCode::RequestedRangeNotSatisfiable => 416,
+      StatusCode::ExpectationFailed => 417,
+      StatusCode::InternalServerError => 500,
+      StatusCode::NotImplemented => 501,
+      StatusCode::BadGateway => 502,
+      StatusCode::ServiceUnavailable => 503,
+      StatusCode::GatewayTimeout => 504,
+      StatusCode::VersionNotSupported => 505,
+      StatusCode::CustomStr(code, _, _) => *code,
+      StatusCode::CustomString(code, _, _) => *code,
     }
   }
 }

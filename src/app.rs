@@ -13,7 +13,6 @@ use crate::monitor::MonitorConfig;
 use crate::route::{Route, RouteHandler, SubApp};
 use crate::thread::pool::ThreadPool;
 
-use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -46,18 +45,6 @@ use crate::stream::{ConnectionStream, IntoConnectionStream};
 /// Every app has a default error handler, which simply displays the status code.
 /// The source code for this default error handler is copied below since it is a good example.
 ///
-/// ## Example
-/// ```
-/// fn error_handler(status_code: humpty::http::StatusCode) -> humpty::http::Response {
-///     let body = format!(
-///         "<html><body><h1>{} {}</h1></body></html>",
-///         Into::<u16>::into(status_code.clone()),
-///         Into::<&str>::into(status_code.clone())
-///     );
-///
-///     humpty::http::Response::new(status_code, body.as_bytes())
-/// }
-/// ```
 pub type ErrorHandler = fn(StatusCode) -> Response;
 
 /// Represents a generic error with the program.
@@ -281,7 +268,7 @@ fn client_handler<T: IntoConnectionStream>(
   monitor: MonitorConfig,
   timeout: Option<Duration>,
 ) {
-  let mut stream = stream.into_connection_stream();
+  let stream = stream.into_connection_stream();
 
   let addr = if let Ok(addr) = stream.peer_addr() {
     addr
@@ -385,13 +372,6 @@ fn client_handler<T: IntoConnectionStream>(
           }
         }
 
-        match response.headers.get_mut(HeaderType::ContentLength) {
-          Some(_) => (),
-          None => {
-            response.headers.add(HeaderType::ContentLength, response.body.len().to_string());
-          }
-        }
-
         // Set HTTP version
         response.version.clone_from(&request.version);
         response
@@ -405,10 +385,9 @@ fn client_handler<T: IntoConnectionStream>(
     };
 
     // Write the response to the stream
-    let status = response.status_code;
-    let response_bytes: Vec<u8> = response.into();
+    let status = response.status_code.clone();
 
-    if let Err(e) = stream.write_all(&response_bytes) {
+    if let Err(e) = response.write_to(stream.as_stream_write()) {
       monitor.send(
         Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(e.to_string()),
       );
@@ -416,17 +395,17 @@ fn client_handler<T: IntoConnectionStream>(
       break;
     };
 
-    if let Err(e) = stream.flush() {
-      monitor.send(
-        Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(e.to_string()),
-      );
+    // if let Err(e) = stream.flush() {
+    //   monitor.send(
+    //     Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(e.to_string()),
+    //   );
+    //
+    //   break;
+    // };
 
-      break;
-    };
+    let status_str: &str = status.status_line();
 
-    let status_str: &str = status.into();
-
-    match status {
+    match &status {
       StatusCode::OK => monitor.send(
         Event::new(EventType::RequestServedSuccess)
           .with_peer(addr.clone())
@@ -442,7 +421,7 @@ fn client_handler<T: IntoConnectionStream>(
           monitor.send(
             Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(format!(
               "{} {} {}",
-              u16::from(e),
+              e.code(),
               status_str,
               request.uri
             )),
@@ -451,7 +430,7 @@ fn client_handler<T: IntoConnectionStream>(
           monitor.send(
             Event::new(EventType::RequestServedError).with_peer(addr.clone()).with_info(format!(
               "{} {}",
-              u16::from(e),
+              e.code(),
               status_str
             )),
           )
@@ -534,10 +513,14 @@ fn call_websocket_handler(
 /// The default error handler for every Humpty app.
 /// This can be overridden by using the `with_error_handler` method when building the app.
 pub(crate) fn error_handler(status_code: StatusCode) -> Response {
+  // TODO change this to http 500 without body.
+  // This code makes the assumption that we are talking to a browser, this is a dangerous assumption to make.
+  // We would if we want to send html check if the Accept header of the request even allows for html.
+  // This is effort I want to outsource to the user of the library, as for 99% of cases this is probably a wrong guess.
   let body = format!(
     "<html><body><h1>{} {}</h1></body></html>",
-    Into::<u16>::into(status_code),
-    Into::<&str>::into(status_code)
+    status_code.code(),
+    status_code.status_line(),
   );
 
   Response::new(status_code, body.as_bytes())

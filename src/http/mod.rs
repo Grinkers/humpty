@@ -10,6 +10,7 @@ pub mod mime;
 pub mod request;
 pub mod request_body;
 pub mod response;
+pub mod response_body;
 pub mod status;
 
 pub use request::Request;

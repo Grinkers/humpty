@@ -127,6 +127,8 @@ where
 }
 
 /// Represents a header received in a request.
+///TODO implement to &str fn to prevent clone on serialization!
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum HeaderType {
   /// Informs the server about the types of data that can be sent back.

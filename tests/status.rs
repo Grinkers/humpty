@@ -1,7 +1,5 @@
 #[cfg(test)]
 mod test {
-  use std::convert::TryInto;
-
   use humpty::http::status::StatusCode;
 
   #[test]
@@ -13,25 +11,25 @@ mod test {
     ];
 
     for code in valid_codes {
-      assert!(StatusCode::try_from(code).is_ok());
+      assert!(StatusCode::from_well_known_code(code).is_some());
     }
 
-    assert!(StatusCode::try_from(69).is_err());
-    assert!(StatusCode::try_from(420).is_err());
-    assert!(StatusCode::try_from(1337).is_err());
+    assert!(StatusCode::from_well_known_code(69).is_none());
+    assert!(StatusCode::from_well_known_code(420).is_none());
+    assert!(StatusCode::from_well_known_code(1337).is_none());
   }
 
   #[test]
   fn test_into_code() {
-    assert!(TryInto::<StatusCode>::try_into(200u16).is_ok());
-    assert!(TryInto::<StatusCode>::try_into(404u16).is_ok());
-    assert!(TryInto::<StatusCode>::try_into(1337u16).is_err());
+    assert!(StatusCode::from_well_known_code(200u16).is_some());
+    assert!(StatusCode::from_well_known_code(404u16).is_some());
+    assert!(StatusCode::from_well_known_code(1337u16).is_none());
   }
 
   #[test]
   fn test_into_string() {
-    assert_eq!(Into::<&str>::into(StatusCode::OK), "OK");
-    assert_eq!(Into::<&str>::into(StatusCode::NotFound), "Not Found");
-    assert_eq!(Into::<&str>::into(StatusCode::BadGateway), "Bad Gateway");
+    assert_eq!(StatusCode::OK.status_line(), "OK");
+    assert_eq!(StatusCode::NotFound.status_line(), "Not Found");
+    assert_eq!(StatusCode::BadGateway.status_line(), "Bad Gateway");
   }
 }

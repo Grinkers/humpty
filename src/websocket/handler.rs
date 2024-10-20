@@ -10,7 +10,6 @@ use crate::http::headers::HeaderType;
 use crate::http::{Request, Response, StatusCode};
 
 use crate::stream::ConnectionStream;
-use std::io::Write;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
@@ -117,9 +116,7 @@ fn handshake(
     .with_header("Sec-WebSocket-Accept", sec_websocket_accept);
 
   // Transmit the handshake response
-  let response_bytes: Vec<u8> = response.into();
-  stream.write_all(&response_bytes).map_err(|_| WebsocketError::WriteError)?;
-  stream.flush().map_err(|_| WebsocketError::WriteError)?;
+  response.write_to(stream.as_stream_write()).map_err(|_| WebsocketError::WriteError)?;
 
   Ok(())
 }

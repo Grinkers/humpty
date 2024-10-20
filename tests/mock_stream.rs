@@ -15,6 +15,11 @@ impl MockStream {
   }
 
   #[allow(dead_code)]
+  pub fn without_data() -> Self {
+    Self::with_data(VecDeque::new())
+  }
+
+  #[allow(dead_code)]
   pub fn copy_written_data(&self) -> Vec<u8> {
     self.write_data.lock().unwrap().clone()
   }

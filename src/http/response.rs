@@ -4,9 +4,11 @@ use crate::http::cookie::SetCookie;
 use crate::http::headers::{HeaderLike, HeaderType, Headers};
 use crate::http::status::StatusCode;
 
-use std::convert::TryFrom;
-use std::error::Error;
-use std::io::{BufRead, BufReader, Read};
+use crate::http::response_body::{ReadAndSeek, ResponseBody};
+use crate::stream::ConnectionStreamWrite;
+use std::io;
+use std::io::Error;
+use std::io::ErrorKind;
 
 /// Represents a response from the server.
 /// Implements `Into<Vec<u8>>` so can be serialised into bytes to transmit.
@@ -19,19 +21,19 @@ use std::io::{BufRead, BufReader, Read};
 /// ## Advanced Creation
 /// ```
 /// humpty::http::Response::empty(humpty::http::StatusCode::OK)
-///     .with_bytes(b"Success")
+///     .with_body_slice(b"Success")
 ///     .with_header(humpty::http::headers::HeaderType::ContentType, "text/plain");
 /// ```
 #[derive(Debug)]
 pub struct Response {
   /// The HTTP version of the response.
-  pub version: String,
+  pub version: String, //TODO change this to an enum, this can only be Http1.0 or Http1.1 and 99% of time it is http 1.1
   /// The status code of the response, for example 200 OK.
   pub status_code: StatusCode,
   /// A list of the headers included in the response.
   pub headers: Headers,
   /// The body of the response.
-  pub body: Vec<u8>,
+  pub body: Option<ResponseBody>,
 }
 
 /// An error which occurred during the parsing of a response.
@@ -49,15 +51,10 @@ impl std::fmt::Display for ResponseError {
   }
 }
 
-impl Error for ResponseError {}
+impl std::error::Error for ResponseError {}
 
 impl Response {
   /// Creates a new response object with the given status code, bytes and request.
-  /// Functionally equivalent to the following (but with some allocation optimisations not shown):
-  ///
-  /// ```
-  /// humpty::http::Response::empty(humpty::http::StatusCode::OK).with_bytes(b"Success");
-  /// ```
   ///
   /// ## Note about Headers
   /// If you want to add headers to a response, ideally use `Response::empty` and the builder pattern
@@ -70,14 +67,14 @@ impl Response {
       version: "HTTP/1.1".to_string(),
       status_code,
       headers: Headers::new(),
-      body: bytes.as_ref().to_vec(),
+      body: Some(ResponseBody::from_slice(&bytes)),
     }
   }
 
   /// Creates a new response object with the given status code.
   /// Automatically sets the HTTP version to "HTTP/1.1", sets no headers, and creates an empty body.
   pub fn empty(status_code: StatusCode) -> Self {
-    Self { version: "HTTP/1.1".to_string(), status_code, headers: Headers::new(), body: Vec::new() }
+    Self { version: "HTTP/1.1".to_string(), status_code, headers: Headers::new(), body: None }
   }
 
   /// Creates a redirect response to the given location.
@@ -86,6 +83,45 @@ impl Response {
     T: AsRef<str>,
   {
     Self::empty(StatusCode::MovedPermanently).with_header(HeaderType::Location, location)
+  }
+
+  ///Removes the body from the response
+  pub fn without_body(mut self) -> Self {
+    self.body = None;
+    self
+  }
+
+  ///Set the body to use with the response
+  pub fn with_body(mut self, body: ResponseBody) -> Self {
+    self.body = Some(body);
+    self
+  }
+
+  /// Use the string body as request body
+  pub fn with_body_string<T: AsRef<str>>(mut self, body: T) -> Self {
+    self.body = Some(ResponseBody::FixedSizeTextData(body.as_ref().to_string()));
+    self
+  }
+
+  /// Use the binary body as request body
+  pub fn with_body_vec(mut self, body: Vec<u8>) -> Self {
+    self.body = Some(ResponseBody::from_data(body));
+    self
+  }
+
+  /// Use the binary body as request body
+  pub fn with_body_slice<T: AsRef<[u8]>>(mut self, body: T) -> Self {
+    self.body = Some(ResponseBody::from_slice(&body));
+    self
+  }
+
+  /// Use the file (or something file like) as request body
+  /// Note: this call fetches the file size which must not change afterward.
+  /// This call uses seek to move the file pointer. Any seeking done prior to this call is ignored.
+  /// The actual body will always contain the entire "file"
+  pub fn with_body_file<T: ReadAndSeek + 'static>(mut self, body: T) -> io::Result<Self> {
+    self.body = Some(ResponseBody::from_file(body)?);
+    Ok(self)
   }
 
   /// Adds the given header to the response.
@@ -97,30 +133,8 @@ impl Response {
 
   /// Adds the given cookie to the response in the `Set-Cookie` header.
   /// Returns itself for use in a builder pattern.
-  ///
-  /// ## Example
-  /// ```
-  /// humpty::http::Response::empty(humpty::http::StatusCode::OK)
-  ///     .with_bytes(b"Success")
-  ///     .with_cookie(
-  ///         humpty::http::cookie::SetCookie::new("SessionToken", "abc123")
-  ///             .with_max_age(std::time::Duration::from_secs(3600))
-  ///             .with_secure(true)
-  ///             .with_path("/")
-  ///     );
-  /// ```
   pub fn with_cookie(mut self, cookie: SetCookie) -> Self {
     self.headers.push(cookie.into());
-    self
-  }
-
-  /// Appends the given bytes to the body.
-  /// Returns itself for use in a builder pattern.
-  pub fn with_bytes<T>(mut self, bytes: T) -> Self
-  where
-    T: AsRef<[u8]>,
-  {
-    self.body.extend(bytes.as_ref());
     self
   }
 
@@ -130,131 +144,63 @@ impl Response {
   }
 
   /// Returns the body as text, if possible.
-  pub fn text(&self) -> Option<String> {
-    String::from_utf8(self.body.clone()).ok()
+  pub fn body(&self) -> Option<&ResponseBody> {
+    self.body.as_ref()
   }
 
-  /// Attempts to read and parse one HTTP response from the given stream.
   ///
-  /// Converts chunked transfer encoding into a regular body.
-  pub fn from_stream<T>(stream: &mut T) -> Result<Self, ResponseError>
-  where
-    T: Read,
-  {
-    let mut reader = BufReader::new(stream);
-    let mut start_line_buf: Vec<u8> = Vec::new();
-    reader.read_until(0xA, &mut start_line_buf).map_err(|_| ResponseError::Stream)?;
+  /// Write the request to a streaming output. This consumes the request object.
+  ///
+  pub fn write_to<T: ConnectionStreamWrite + ?Sized>(mut self, destination: &T) -> io::Result<()> {
+    destination.write(self.version.as_bytes())?;
+    destination.write(b" ")?;
+    destination.write(self.status_code.code_as_utf())?;
+    destination.write(b" ")?;
+    destination.write(self.status_code.status_line().as_bytes())?;
 
-    let start_line_string =
-      String::from_utf8(start_line_buf).map_err(|_| ResponseError::Response)?;
-    let start_line: Vec<&str> = start_line_string.splitn(3, ' ').collect();
-
-    safe_assert(start_line.len() == 3)?;
-
-    let version = start_line[0].to_string();
-    let status_code: u16 = start_line[1].parse().map_err(|_| ResponseError::Response)?;
-    let status = StatusCode::try_from(status_code).map_err(|_| ResponseError::Response)?;
-
-    let mut headers = Headers::new();
-
-    loop {
-      let mut line_buf: Vec<u8> = Vec::new();
-      reader.read_until(0xA, &mut line_buf).map_err(|_| ResponseError::Stream)?;
-      let line = String::from_utf8(line_buf).map_err(|_| ResponseError::Response)?;
-
-      if line == "\r\n" {
-        break;
-      } else {
-        safe_assert(line.len() >= 2)?;
-        let line_without_crlf = &line[0..line.len() - 2];
-        let line_parts: Vec<&str> = line_without_crlf.splitn(2, ':').collect();
-        headers.add(HeaderType::from(line_parts[0]), line_parts[1].trim_start());
-      }
-    }
-
-    if headers
-      .get(&HeaderType::TransferEncoding)
-      .and_then(|te| if te == "chunked" { Some(()) } else { None })
-      .is_some()
-    {
-      let mut body: Vec<u8> = Vec::new();
-
-      while let Some(chunk) = parse_chunk(&mut reader) {
-        body.extend(chunk);
+    for header in self.get_headers().iter() {
+      if header.name == HeaderType::ContentLength {
+        //TODO we should make it impossible for a response object with this header to be constructed
+        return Err(Error::new(
+          ErrorKind::Other,
+          "Response contains forbidden header Content-Length",
+        ));
       }
 
-      headers.remove(&HeaderType::TransferEncoding);
-      headers.add(HeaderType::ContentLength, body.len().to_string());
+      if header.name == HeaderType::TransferEncoding {
+        //TODO we should make it impossible for a response object with this header to be constructed
+        return Err(Error::new(
+          ErrorKind::Other,
+          "Response contains forbidden header Transfer-Encoding",
+        ));
+      }
 
-      Ok(Self { version, status_code: status, headers, body })
-    } else if let Some(content_length) = headers.get(&HeaderType::ContentLength) {
-      let content_length: usize = content_length.parse().map_err(|_| ResponseError::Response)?;
-      let mut content_buf: Vec<u8> = vec![0u8; content_length];
-      reader.read_exact(&mut content_buf).map_err(|_| ResponseError::Stream)?;
-
-      Ok(Self { version, status_code: status, headers, body: content_buf })
-    } else {
-      Ok(Self { version, status_code: status, headers, body: Vec::new() })
-    }
-  }
-}
-
-impl From<Response> for Vec<u8> {
-  fn from(val: Response) -> Self {
-    let status_line = format!(
-      "{} {} {}",
-      val.version,
-      Into::<u16>::into(val.status_code),
-      Into::<&str>::into(val.status_code)
-    );
-
-    let mut bytes: Vec<u8> =
-      Vec::with_capacity(status_line.len() + val.body.len() + val.headers.len() * 32);
-    bytes.extend(status_line.as_bytes());
-
-    for header in val.get_headers().iter() {
-      bytes.extend(b"\r\n");
-      bytes.extend(header.name.to_string().as_bytes());
-      bytes.extend(b": ");
-      bytes.extend(header.value.as_bytes());
+      destination.write(b"\r\n")?;
+      //TODO remove this clone
+      destination.write(header.name.to_string().as_bytes())?;
+      destination.write(b": ")?;
+      destination.write(header.value.as_bytes())?;
     }
 
-    bytes.extend(b"\r\n\r\n");
+    if let Some(body) = self.body.as_mut() {
+      if body.is_chunked() {
+        destination.write(b"\r\nTransfer-Encoding: chunked\r\n\r\n")?;
+        body.write_to(destination)?;
+        destination.flush()?;
+        return Ok(());
+      }
 
-    if !val.body.is_empty() {
-      bytes.extend(val.body);
-      //bytes.extend(b"\r\n");
+      if let Some(len) = body.content_length() {
+        destination.write(format!("\r\nContent-Length: {}\r\n\r\n", len).as_bytes())?;
+      }
+
+      body.write_to(destination)?;
+      destination.flush()?;
+      return Ok(());
     }
 
-    bytes
-  }
-}
-
-/// Parses a chunk using the chunked transfer encoding.
-fn parse_chunk<T>(stream: &mut BufReader<T>) -> Option<Vec<u8>>
-where
-  T: Read,
-{
-  let mut length_line_buf: Vec<u8> = Vec::new();
-  stream.read_until(0xA, &mut length_line_buf).ok()?;
-  let length: usize =
-    usize::from_str_radix(std::str::from_utf8(&length_line_buf).ok()?.trim_end(), 16).ok()?;
-
-  if length == 0 {
-    stream.read_exact(&mut [0u8, 0]).ok()?;
-    None
-  } else {
-    let mut content_buf: Vec<u8> = vec![0u8; length];
-    stream.read_exact(&mut content_buf).ok()?;
-    stream.read_exact(&mut [0u8, 0]).ok()?;
-    Some(content_buf)
-  }
-}
-
-/// Asserts that the condition is true, returning a `Result`.
-fn safe_assert(condition: bool) -> Result<(), ResponseError> {
-  match condition {
-    true => Ok(()),
-    false => Err(ResponseError::Response),
+    destination.write(b"\r\nContent-Length: 0\r\n\r\n")?;
+    destination.flush()?;
+    Ok(())
   }
 }

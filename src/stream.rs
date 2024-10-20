@@ -28,8 +28,6 @@ pub trait ConnectionStream: ConnectionStreamRead + ConnectionStreamWrite {
   fn new_ref(&self) -> Box<dyn ConnectionStream>;
 
   fn peer_addr(&self) -> io::Result<String>;
-
-  fn as_stream_read(&self) -> &dyn ConnectionStreamRead;
 }
 
 pub trait ConnectionStreamRead: Send + Debug + Read {
@@ -49,7 +47,9 @@ pub trait ConnectionStreamRead: Send + Debug + Read {
 
   fn new_ref_read(&self) -> Box<dyn Read + Send>;
 
-  fn new_ref_raw_read(&self) -> Box<dyn ConnectionStreamRead>;
+  fn as_stream_read(&self) -> &dyn ConnectionStreamRead;
+
+  fn new_ref_stream_read(&self) -> Box<dyn ConnectionStreamRead>;
 
   fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()>;
 }
@@ -57,14 +57,18 @@ pub trait ConnectionStreamRead: Send + Debug + Read {
 pub trait ConnectionStreamWrite: Send + Debug + Write {
   ///De-mut of Write
   fn write(&self, buf: &[u8]) -> io::Result<usize>;
+  ///De-mut of Write
+  fn write_all(&self, buf: &[u8]) -> io::Result<()>;
 
+  ///De-mut of Write
   fn flush(&self) -> io::Result<()>;
 
   fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()>;
 
   fn new_ref_write(&self) -> Box<dyn Write + Send>;
 
-  fn new_ref_raw_write(&self) -> Box<dyn ConnectionStreamWrite>;
+  fn new_ref_stream_write(&self) -> Box<dyn ConnectionStreamWrite>;
+  fn as_stream_write(&self) -> &dyn ConnectionStreamWrite;
 }
 
 pub trait IntoConnectionStream {
@@ -179,7 +183,11 @@ mod tcp {
       Box::new(self.clone()) as Box<dyn Read + Send>
     }
 
-    fn new_ref_raw_read(&self) -> Box<dyn ConnectionStreamRead> {
+    fn as_stream_read(&self) -> &dyn ConnectionStreamRead {
+      self
+    }
+
+    fn new_ref_stream_read(&self) -> Box<dyn ConnectionStreamRead> {
       Box::new(self.clone()) as Box<dyn ConnectionStreamRead>
     }
 
@@ -191,6 +199,10 @@ mod tcp {
   impl ConnectionStreamWrite for TcpStreamOuter {
     fn write(&self, buf: &[u8]) -> io::Result<usize> {
       unwrap_poison(self.0.write_mutex.lock())?.write(buf)
+    }
+
+    fn write_all(&self, buf: &[u8]) -> io::Result<()> {
+      unwrap_poison(self.0.write_mutex.lock())?.write_all(buf)
     }
 
     fn flush(&self) -> io::Result<()> {
@@ -205,8 +217,12 @@ mod tcp {
       Box::new(self.clone()) as Box<dyn Write + Send>
     }
 
-    fn new_ref_raw_write(&self) -> Box<dyn ConnectionStreamWrite> {
+    fn new_ref_stream_write(&self) -> Box<dyn ConnectionStreamWrite> {
       Box::new(self.clone()) as Box<dyn ConnectionStreamWrite>
+    }
+
+    fn as_stream_write(&self) -> &dyn ConnectionStreamWrite {
+      self
     }
   }
 
@@ -227,10 +243,6 @@ mod tcp {
 
     fn peer_addr(&self) -> io::Result<String> {
       Ok(format!("{}", self.0.stream.0.peer_addr()?))
-    }
-
-    fn as_stream_read(&self) -> &dyn ConnectionStreamRead {
-      self
     }
   }
 }
@@ -290,7 +302,11 @@ mod boxed {
       Box::new(self.clone()) as Box<dyn Read + Send>
     }
 
-    fn new_ref_raw_read(&self) -> Box<dyn ConnectionStreamRead> {
+    fn as_stream_read(&self) -> &dyn ConnectionStreamRead {
+      self
+    }
+
+    fn new_ref_stream_read(&self) -> Box<dyn ConnectionStreamRead> {
       Box::new(self.clone()) as Box<dyn ConnectionStreamRead>
     }
 
@@ -310,6 +326,10 @@ mod boxed {
       unwrap_poison(self.0.write_mutex.lock())?.write(buf)
     }
 
+    fn write_all(&self, buf: &[u8]) -> io::Result<()> {
+      unwrap_poison(self.0.write_mutex.lock())?.write_all(buf)
+    }
+
     fn flush(&self) -> std::io::Result<()> {
       unwrap_poison(self.0.write_mutex.lock())?.flush()
     }
@@ -322,8 +342,12 @@ mod boxed {
       Box::new(self.clone()) as Box<dyn Write + Send>
     }
 
-    fn new_ref_raw_write(&self) -> Box<dyn ConnectionStreamWrite> {
+    fn new_ref_stream_write(&self) -> Box<dyn ConnectionStreamWrite> {
       Box::new(self.clone()) as Box<dyn ConnectionStreamWrite>
+    }
+
+    fn as_stream_write(&self) -> &dyn ConnectionStreamWrite {
+      self
     }
   }
 
@@ -344,10 +368,6 @@ mod boxed {
 
     fn peer_addr(&self) -> io::Result<String> {
       Ok("Box".to_string())
-    }
-
-    fn as_stream_read(&self) -> &dyn ConnectionStreamRead {
-      self
     }
   }
 }
@@ -450,7 +470,11 @@ mod unix {
       Box::new(self.clone()) as Box<dyn Read + Send>
     }
 
-    fn new_ref_raw_read(&self) -> Box<dyn ConnectionStreamRead> {
+    fn as_stream_read(&self) -> &dyn ConnectionStreamRead {
+      self
+    }
+
+    fn new_ref_stream_read(&self) -> Box<dyn ConnectionStreamRead> {
       Box::new(self.clone()) as Box<dyn ConnectionStreamRead>
     }
 
@@ -462,6 +486,10 @@ mod unix {
   impl ConnectionStreamWrite for UnixStreamOuter {
     fn write(&self, buf: &[u8]) -> io::Result<usize> {
       unwrap_poison(self.0.write_mutex.lock())?.write(buf)
+    }
+
+    fn write_all(&self, buf: &[u8]) -> io::Result<()> {
+      unwrap_poison(self.0.write_mutex.lock())?.write_all(buf)
     }
 
     fn flush(&self) -> io::Result<()> {
@@ -476,8 +504,12 @@ mod unix {
       Box::new(self.clone()) as Box<dyn Write + Send>
     }
 
-    fn new_ref_raw_write(&self) -> Box<dyn ConnectionStreamWrite> {
+    fn new_ref_stream_write(&self) -> Box<dyn ConnectionStreamWrite> {
       Box::new(self.clone()) as Box<dyn ConnectionStreamWrite>
+    }
+
+    fn as_stream_write(&self) -> &dyn ConnectionStreamWrite {
+      self
     }
   }
 
@@ -507,10 +539,6 @@ mod unix {
           .map(|a| a.to_string_lossy().to_string())
           .unwrap_or_else(|| "".to_string()),
       )
-    }
-
-    fn as_stream_read(&self) -> &dyn ConnectionStreamRead {
-      self
     }
   }
 }

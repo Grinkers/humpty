@@ -101,7 +101,7 @@ pub fn serve_dir(directory_path: &'static str) -> impl Fn(Request, &str) -> Resp
             }
           }
 
-          error_handler(StatusCode::InternalError)
+          error_handler(StatusCode::InternalServerError)
         }
       }
     } else {
