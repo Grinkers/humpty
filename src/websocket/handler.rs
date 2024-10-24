@@ -22,14 +22,14 @@ impl<T> WebsocketHandler for T where T: Fn(WebsocketStream) + Send + Sync {}
 ///
 /// ## Example
 /// ```no_run
-/// use humpty::App;
+/// use humpty::HumptyBuilder;
 /// use humpty::websocket::message::Message;
 /// use humpty::websocket::stream::WebsocketStream;
 /// use humpty::websocket::websocket_handler;
 ///
 ///
 /// fn main() {
-///     let app = App::default()
+///     let app = HumptyBuilder::default()
 ///         .with_websocket_route("/", websocket_handler(my_handler));
 ///
 ///     app.run("0.0.0.0:8080").unwrap();
@@ -59,7 +59,7 @@ where
 ///
 /// ## Example
 /// ```no_run
-/// use humpty::App;
+/// use humpty::HumptyBuilder;
 /// use humpty::websocket::async_app::{AsyncStream, AsyncWebsocketApp};
 /// use humpty::websocket::handler::async_websocket_handler;
 /// use humpty::websocket::message::Message;
@@ -69,7 +69,7 @@ where
 /// fn main() {
 ///     let websocket_app = AsyncWebsocketApp::new_unlinked().with_message_handler(message_handler);
 ///
-///     let humpty_app = App::default()
+///     let humpty_app = HumptyBuilder::default()
 ///         .with_websocket_route("/ws", async_websocket_handler(websocket_app.connect_hook().unwrap()));
 ///
 ///     spawn(move || humpty_app.run("0.0.0.0:80").unwrap());
@@ -116,7 +116,7 @@ fn handshake(
     .with_header("Sec-WebSocket-Accept", sec_websocket_accept);
 
   // Transmit the handshake response
-  response.write_to(stream.as_stream_write()).map_err(|_| WebsocketError::WriteError)?;
+  response.write_to(request.version, stream.as_stream_write()).map_err(|_| WebsocketError::WriteError)?;
 
   Ok(())
 }

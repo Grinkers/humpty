@@ -5,12 +5,12 @@
 //! This is because content is found relative to the CWD instead of the binary.
 
 use humpty::handlers;
-use humpty::App;
+use humpty::HumptyBuilder;
 
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-  let app = App::default()
+  let app = HumptyBuilder::default()
     // Serve the "/" route with the specified file
     .with_route("/", handlers::serve_file("./examples/static/pages/index.html"))
     // Serve the "/img/*" route with files stored in the "./static/images" directory.

@@ -7,7 +7,7 @@ use crate::websocket::restion::Restion;
 use crate::websocket::stream::WebsocketStream;
 
 use crate::thread::pool::ThreadPool;
-use crate::App;
+use crate::HumptyBuilder;
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -80,7 +80,7 @@ pub enum OutgoingMessage {
 /// Each enum variant has corresponding fields for the configuration.
 pub enum HumptyLink {
   /// The app uses its own internal Humpty application.
-  Internal(Box<App>, SocketAddr),
+  Internal(Box<HumptyBuilder>, SocketAddr),
   /// The app is linked to an external Humpty application and receives connections through a channel.
   External(Arc<Mutex<Sender<WebsocketStream>>>),
 }
@@ -123,7 +123,7 @@ impl Default for AsyncWebsocketApp {
     let (message_sender, outgoing_messages) = channel();
 
     let humpty_app =
-      App::new_with_config(1).with_websocket_route("/*", async_websocket_handler(connect_hook));
+      HumptyBuilder::new_with_config(1).with_websocket_route("/*", async_websocket_handler(connect_hook));
 
     Self {
       humpty_link: HumptyLink::Internal(
@@ -155,7 +155,7 @@ impl AsyncWebsocketApp {
     let (connect_hook, incoming_streams) = channel();
     let connect_hook = Arc::new(Mutex::new(connect_hook));
 
-    let humpty_app = App::new_with_config(connection_threads)
+    let humpty_app = HumptyBuilder::new_with_config(connection_threads)
       .with_websocket_route("/*", async_websocket_handler(connect_hook));
 
     Self {
@@ -294,6 +294,7 @@ impl AsyncWebsocketApp {
   }
 
   /// Start the application on the main thread.
+  #[allow(deprecated)]
   pub fn run(mut self) {
     // Ensure that the underlying Humpty application is running if it is internal.
     if let HumptyLink::Internal(app, addr) = self.humpty_link {

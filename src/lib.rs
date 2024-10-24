@@ -6,7 +6,7 @@ pub mod handlers;
 pub mod http;
 pub mod websocket;
 
-mod app;
+mod humpty_builder;
 mod handler_traits;
 mod krauss;
 mod percent;
@@ -14,6 +14,7 @@ mod route;
 pub mod stream;
 mod thread;
 mod util;
+mod humpty_server;
 
-pub use app::App;
+pub use humpty_builder::HumptyBuilder;
 pub use route::SubApp;

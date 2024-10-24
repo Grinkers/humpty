@@ -1,7 +1,6 @@
 //! Provides functionality for handling app routes.
 
-use crate::app::{PathAwareRequestHandler, RequestHandler, WebsocketHandler};
-use crate::http::cors::Cors;
+use crate::humpty_builder::{PathAwareRequestHandler, RequestHandler, WebsocketHandler};
 use crate::krauss;
 use crate::percent::PercentDecode;
 
@@ -16,9 +15,6 @@ pub struct SubApp {
   pub routes: Vec<RouteHandler>,
   /// The routes to process WebSocket requests for and their handlers.
   pub websocket_routes: Vec<WebsocketRouteHandler>,
-  /// The CORS configuration for this subapp.
-  /// If not specified, it is down to the individual routes to specify CORS configuration.
-  pub cors: Option<Cors>,
 }
 
 /// Encapsulates a route and its handler.
@@ -27,8 +23,6 @@ pub struct RouteHandler {
   pub route: String,
   /// The handler to run when the route is matched.
   pub handler: Box<dyn RequestHandler>,
-  /// The CORS configuration for the route.
-  pub cors: Cors,
 }
 
 /// Encapsulates a route and its WebSocket handler.
@@ -41,7 +35,7 @@ pub struct WebsocketRouteHandler {
 
 impl Default for SubApp {
   fn default() -> Self {
-    SubApp { host: "*".to_string(), routes: Vec::new(), websocket_routes: Vec::new(), cors: None }
+    SubApp { host: "*".to_string(), routes: Vec::new(), websocket_routes: Vec::new() }
   }
 }
 
@@ -60,7 +54,6 @@ impl SubApp {
     self.routes.push(RouteHandler {
       route: route.to_string(),
       handler: Box::new(handler),
-      cors: self.cors.as_ref().map_or(Cors::default(), |c| c.clone()),
     });
     self
   }
@@ -75,7 +68,6 @@ impl SubApp {
     self.routes.push(RouteHandler {
       route: route.to_string(),
       handler: Box::new(move |request| handler.serve(request, route)),
-      cors: self.cors.as_ref().map_or(Cors::default(), |c| c.clone()),
     });
     self
   }
@@ -90,34 +82,6 @@ impl SubApp {
     self
       .websocket_routes
       .push(WebsocketRouteHandler { route: route.to_string(), handler: Box::new(handler) });
-    self
-  }
-
-  /// Sets the CORS configuration for the sub-app.
-  ///
-  /// This overrides the CORS configuration for existing and future individual routes.
-  ///
-  /// To simply allow every origin, method and header, use `Cors::wildcard()`.
-  pub fn with_cors(mut self, cors: Cors) -> Self {
-    self.cors = Some(cors.clone());
-
-    self.routes.iter_mut().for_each(|route| {
-      route.cors = cors.clone();
-    });
-
-    self
-  }
-
-  /// Sets the CORS configuration for a given route.
-  ///
-  /// To simply allow every origin, method and header, use `Cors::wildcard()`.
-  pub fn with_cors_config(mut self, route: &str, cors: Cors) -> Self {
-    self.routes.iter_mut().for_each(|r| {
-      if r.route == route {
-        r.cors = cors.clone();
-      }
-    });
-
     self
   }
 }

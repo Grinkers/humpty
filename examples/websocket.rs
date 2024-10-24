@@ -1,4 +1,4 @@
-use humpty::{handlers, App};
+use humpty::{handlers, HumptyBuilder};
 
 use humpty::websocket::error::WebsocketError;
 use humpty::websocket::message::Message;
@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn main() -> Result<(), Box<dyn Error>> {
-  let app = App::default()
+  let app = HumptyBuilder::default()
     // Serve the `static` directory to regular HTTP requests.
     .with_path_aware_route("/*", handlers::serve_dir("./examples/static/ws"))
     // Use the `humpty_ws` WebSocket handler to wrap our own echo handler.

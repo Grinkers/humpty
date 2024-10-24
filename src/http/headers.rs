@@ -57,6 +57,35 @@ impl Headers {
     self.0.iter().find(|h| h.name == header).map(|h| h.value.as_str())
   }
 
+  /// Removes all previous instances of the header and sets the header to the single value.
+  /// Its guaranteed that the header is only present exactly once after this call returns.
+  pub fn set(&mut self, name: impl HeaderLike, value: impl AsRef<str>) {
+    //TODO optimize
+    let header = name.to_header();
+    self.remove(header.clone());
+    self.add(header, value);
+  }
+
+  /// Replaces all header values with a single header.
+  /// The returned Vec contains the removed values. is len() == 0 if there were none.
+  pub fn replace_all(&mut self, name: impl HeaderLike, value: impl AsRef<str>) -> Vec<Header> {
+    let header = name.to_header();
+    let mut hcopy = Vec::with_capacity(self.len());
+    let mut hrem = Vec::new();
+    std::mem::swap(&mut self.0, &mut hcopy);
+    for h in hcopy {
+      if h.name == header {
+        hrem.push(h);
+        continue;
+      }
+
+      self.0.push(h);
+    }
+
+    self.0.push(Header::new(header, value));
+    hrem
+  }
+
   /// Get a mutable reference to the value of the first header with the given name.
   ///
   /// You can either specify the header type as a `HeaderType`, e.g. `HeaderType::ContentType`, or as

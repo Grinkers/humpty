@@ -1,5 +1,6 @@
 //! Defines traits for handler functions.
 
+use std::io;
 use crate::http::{Request, Response};
 use crate::stream::ConnectionStream;
 
@@ -27,13 +28,14 @@ where
 /// }
 /// ```
 pub trait RequestHandler: Send + Sync {
-  fn serve(&self, request: Request) -> Response;
+  fn serve(&self, request: Request) -> io::Result<Response>;
 }
+
 impl<F> RequestHandler for F
 where
-  F: Fn(Request) -> Response + Send + Sync,
+    F: Fn(Request) -> io::Result<Response> + Send + Sync,
 {
-  fn serve(&self, request: Request) -> Response {
+  fn serve(&self, request: Request) -> io::Result<Response> {
     self(request)
   }
 }
@@ -49,13 +51,13 @@ where
 /// }
 /// ```
 pub trait PathAwareRequestHandler: Send + Sync {
-  fn serve(&self, request: Request, route: &'static str) -> Response;
+  fn serve(&self, request: Request, route: &'static str) -> io::Result<Response>;
 }
 impl<F> PathAwareRequestHandler for F
 where
-  F: Fn(Request, &'static str) -> Response + Send + Sync,
+  F: Fn(Request, &'static str) -> io::Result<Response> + Send + Sync,
 {
-  fn serve(&self, request: Request, route: &'static str) -> Response {
+  fn serve(&self, request: Request, route: &'static str) -> io::Result<Response> {
     self(request, route)
   }
 }
