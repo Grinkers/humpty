@@ -1,7 +1,5 @@
 //! Provides functionality for handling HTTP methods.
 
-use super::request::RequestError;
-
 use std::fmt::Display;
 
 /// Represents an HTTP method.
@@ -17,6 +15,8 @@ pub enum Method {
   Delete,
   /// The `OPTIONS` method.
   Options,
+  /// Anything else your heart desires.
+  Custom(String),
 }
 
 impl Method {
@@ -25,16 +25,16 @@ impl Method {
   /// ## Example
   /// ```
   /// let method = humpty::http::method::Method::from_name("GET");
-  /// assert_eq!(method, Ok(humpty::http::method::Method::Get));
+  /// assert_eq!(method, humpty::http::method::Method::Get);
   /// ```
-  pub fn from_name(name: &str) -> Result<Self, RequestError> {
+  pub fn from_name(name: &str) -> Self {
     match name {
-      "GET" => Ok(Self::Get),
-      "POST" => Ok(Self::Post),
-      "PUT" => Ok(Self::Put),
-      "DELETE" => Ok(Self::Delete),
-      "OPTIONS" => Ok(Self::Options),
-      _ => Err(RequestError::Request),
+      "GET" => Self::Get,
+      "POST" => Self::Post,
+      "PUT" => Self::Put,
+      "DELETE" => Self::Delete,
+      "OPTIONS" => Self::Options,
+      _ => Self::Custom(name.to_string()),
     }
   }
 }
@@ -50,6 +50,7 @@ impl Display for Method {
         Method::Put => "PUT",
         Method::Delete => "DELETE",
         Method::Options => "OPTIONS",
+        Method::Custom(name) => name.as_str(),
       }
     )
   }

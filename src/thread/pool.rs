@@ -1,15 +1,14 @@
 //! Provides thread pool functionality.
-
-use crate::monitor::event::EventType;
-use crate::monitor::MonitorConfig;
 use crate::thread::recovery::{PanicMarker, RecoveryThread};
 
+#[cfg(feature = "log")]
+use log::trace;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{Builder, JoinHandle};
-use std::time::Instant;
 
 /// The number of milliseconds a task can be waiting in the pool before the pool is considered overloaded.
+#[cfg(feature = "log")] //This constant is only used in logging for now...
 const OVERLOAD_THRESHOLD: u128 = 100;
 
 /// Represents a pool of threads.
@@ -19,7 +18,6 @@ pub struct ThreadPool {
   threads: Arc<Mutex<Vec<Thread>>>,
   recovery_thread: Option<RecoveryThread>,
   tx: Option<Sender<Message>>,
-  monitor: Option<MonitorConfig>,
 }
 
 /// Represents a single worker thread in the thread pool
@@ -32,7 +30,23 @@ pub struct Thread {
 }
 
 /// Represents a message between threads.
-pub type Message = (Task, Instant);
+pub struct Message {
+  pub task: Task,
+
+  #[cfg(feature = "log")]
+  pub time: std::time::Instant,
+}
+
+impl From<Task> for Message {
+  #[cfg(feature = "log")]
+  fn from(value: Task) -> Self {
+    Message { task: value, time: std::time::Instant::now() }
+  }
+  #[cfg(not(feature = "log"))]
+  fn from(value: Task) -> Self {
+    Message { task: value }
+  }
+}
 
 /// Represents a task to run in the thread pool.
 pub type Task = Box<dyn FnOnce() + Send + 'static>;
@@ -51,7 +65,6 @@ impl ThreadPool {
       threads: Arc::new(Mutex::new(Vec::new())),
       recovery_thread: None,
       tx: Some(channel().0),
-      monitor: None,
     }
   }
 
@@ -64,14 +77,13 @@ impl ThreadPool {
     let (recovery_tx, recovery_rx): (Sender<Option<usize>>, Receiver<Option<usize>>) = channel();
 
     for id in 0..self.thread_count {
-      threads.push(Thread::new(id, rx.clone(), recovery_tx.clone(), self.monitor.clone()))
+      threads.push(Thread::new(id, rx.clone(), recovery_tx.clone()))
     }
 
     self.threads = Arc::new(Mutex::new(threads));
     self.tx = Some(tx);
 
-    let recovery_thread =
-      RecoveryThread::new(recovery_rx, recovery_tx, rx, self.threads.clone(), self.monitor.clone());
+    let recovery_thread = RecoveryThread::new(recovery_rx, recovery_tx, rx, self.threads.clone());
 
     self.recovery_thread = Some(recovery_thread);
     self.started = true;
@@ -85,13 +97,7 @@ impl ThreadPool {
         let _ = rt.0.unwrap().join();
       }
     }
-    self.monitor = None;
     self.started = false;
-  }
-
-  /// Register a monitor for the thread pool.
-  pub fn register_monitor(&mut self, monitor: MonitorConfig) {
-    self.monitor = Some(monitor);
   }
 
   /// Executes a task in the thread pool.
@@ -104,10 +110,9 @@ impl ThreadPool {
   {
     assert!(self.started);
 
-    let boxed_task = Box::new(task);
-    let time_into_pool = Instant::now();
+    let boxed_task = Box::new(task) as Task;
     if let Some(tx) = &self.tx {
-      tx.send((boxed_task, time_into_pool)).unwrap();
+      tx.send(boxed_task.into()).unwrap();
     };
   }
 }
@@ -118,7 +123,6 @@ impl Thread {
     id: usize,
     rx: Arc<Mutex<Receiver<Message>>>,
     panic_tx: Sender<Option<usize>>,
-    monitor: Option<MonitorConfig>,
   ) -> Self {
     let thread = Builder::new()
       .name(format!("{}", id))
@@ -127,7 +131,7 @@ impl Thread {
 
         loop {
           // When the tx pair has been dropped (shutdown initiated), we want to break out.
-          let (func, time) = match rx.lock() {
+          let message = match rx.lock() {
             Ok(res) => match res.recv() {
               Ok(res) => res,
               Err(_) => break,
@@ -135,15 +139,16 @@ impl Thread {
             Err(_) => break,
           };
 
-          if let Some(monitor) = &monitor {
-            let time_in_pool = time.elapsed().as_millis();
+          #[cfg(feature = "log")]
+          if log::Level::Trace <= log::max_level() {
+            let time_in_pool = message.time.elapsed().as_millis();
 
             if time_in_pool > OVERLOAD_THRESHOLD {
-              monitor.send(EventType::ThreadPoolOverload);
+              trace!("ThreadPoolOverload");
             }
           }
 
-          (func)()
+          (message.task)()
         }
 
         let _ = panic_tx.send(None); // Shutdown panic_thread

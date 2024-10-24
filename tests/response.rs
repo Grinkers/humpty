@@ -6,6 +6,7 @@ use humpty::http::response::Response;
 use humpty::http::status::StatusCode;
 use mock_stream::MockStream;
 
+use humpty::http::request::HttpVersion;
 use humpty::http::response_body::{ResponseBody, ResponseBodySink};
 use humpty::stream::IntoConnectionStream;
 use std::time::Duration;
@@ -24,7 +25,7 @@ fn test_response() {
   let stream = MockStream::without_data();
   let raw_stream = stream.clone().into_connection_stream();
 
-  response.write_to(raw_stream.as_stream_write()).expect("err");
+  response.write_to(HttpVersion::Http11, raw_stream.as_stream_write()).expect("err");
   assert_eq!(
     stream.copy_written_data(),
     expected_bytes,
@@ -56,7 +57,7 @@ fn test_chunked_response() {
   let stream = MockStream::without_data();
   let raw_stream = stream.clone().into_connection_stream();
 
-  response.write_to(raw_stream.as_stream_write()).expect("err");
+  response.write_to(HttpVersion::Http11, raw_stream.as_stream_write()).expect("err");
   assert_eq!(
     stream.copy_written_data(),
     expected_bytes,
@@ -98,7 +99,7 @@ fn test_cookie_response() {
   let stream = MockStream::without_data();
   let raw_stream = stream.clone().into_connection_stream();
 
-  response.write_to(raw_stream.as_stream_write()).expect("err");
+  response.write_to(HttpVersion::Http11, raw_stream.as_stream_write()).expect("err");
 
   let bytes: Vec<u8> = stream.copy_written_data();
 

@@ -7,6 +7,7 @@ use humpty::http::headers::{HeaderType, Headers};
 use humpty::http::method::Method;
 use humpty::http::Request;
 
+use humpty::http::request::HttpVersion;
 use humpty::stream::IntoConnectionStream;
 use std::collections::VecDeque;
 use std::iter::FromIterator;
@@ -23,10 +24,10 @@ fn test_request_from_stream() {
   let expected_uri: String = "/testpath".into();
   let expected_query: String = "foo=bar".into();
   assert_eq!(request.method, Method::Get);
-  assert_eq!(request.uri, expected_uri);
+  assert_eq!(request.path, expected_uri);
   assert_eq!(request.query, expected_query);
-  assert_eq!(request.version, "HTTP/1.1");
-  assert!(request.content.is_none());
+  assert_eq!(request.version, HttpVersion::Http11);
+  assert!(request.body.is_none());
   assert_eq!(request.address, Address::new("1.2.3.4:5678").unwrap());
 
   let mut expected_headers: Headers = Headers::new();
@@ -62,9 +63,9 @@ fn test_proxied_request_from_stream() {
   let request = request.unwrap();
   let expected_uri: String = "/testpath".into();
   assert_eq!(request.method, Method::Get);
-  assert_eq!(request.uri, expected_uri);
-  assert_eq!(request.version, "HTTP/1.1");
-  assert!(request.content.is_none());
+  assert_eq!(request.path, expected_uri);
+  assert_eq!(request.version, HttpVersion::Http11);
+  assert!(request.body.is_none());
   assert_eq!(
     request.address,
     Address {

@@ -1,5 +1,5 @@
 use humpty::handlers::serve_file;
-use humpty::{App, SubApp};
+use humpty::{HumptyBuilder, SubApp};
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     .with_route("/different_response", serve_file("./static/localip.html"))
     .with_route("/localip_only", serve_file("./static/localip.html"));
 
-  let app = App::default()
+  let app = HumptyBuilder::default()
     .with_route("/", serve_file("./static/index.html"))
     .with_host("localhost", localhost_subapp)
     .with_host("127.0.0.1", localip_subapp);

@@ -4,6 +4,7 @@ use crate::http::cookie::SetCookie;
 use crate::http::headers::{HeaderLike, HeaderType, Headers};
 use crate::http::status::StatusCode;
 
+use crate::http::request::HttpVersion;
 use crate::http::response_body::{ReadAndSeek, ResponseBody};
 use crate::stream::ConnectionStreamWrite;
 use std::io;
@@ -26,8 +27,6 @@ use std::io::ErrorKind;
 /// ```
 #[derive(Debug)]
 pub struct Response {
-  /// The HTTP version of the response.
-  pub version: String, //TODO change this to an enum, this can only be Http1.0 or Http1.1 and 99% of time it is http 1.1
   /// The status code of the response, for example 200 OK.
   pub status_code: StatusCode,
   /// A list of the headers included in the response.
@@ -63,18 +62,23 @@ impl Response {
   where
     T: AsRef<[u8]>,
   {
-    Self {
-      version: "HTTP/1.1".to_string(),
-      status_code,
-      headers: Headers::new(),
-      body: Some(ResponseBody::from_slice(&bytes)),
-    }
+    Self { status_code, headers: Headers::new(), body: Some(ResponseBody::from_slice(&bytes)) }
   }
 
   /// Creates a new response object with the given status code.
   /// Automatically sets the HTTP version to "HTTP/1.1", sets no headers, and creates an empty body.
   pub fn empty(status_code: StatusCode) -> Self {
-    Self { version: "HTTP/1.1".to_string(), status_code, headers: Headers::new(), body: None }
+    Self { status_code, headers: Headers::new(), body: None }
+  }
+
+  /// HTTP 200 OK with body.
+  pub fn ok(bytes: ResponseBody) -> Self {
+    Self::empty(StatusCode::OK).with_body(bytes)
+  }
+
+  /// HTTP 404 without body
+  pub fn not_found() -> Self {
+    Self::empty(StatusCode::NotFound)
   }
 
   /// Creates a redirect response to the given location.
@@ -151,8 +155,20 @@ impl Response {
   ///
   /// Write the request to a streaming output. This consumes the request object.
   ///
-  pub fn write_to<T: ConnectionStreamWrite + ?Sized>(mut self, destination: &T) -> io::Result<()> {
-    destination.write(self.version.as_bytes())?;
+  pub fn write_to<T: ConnectionStreamWrite + ?Sized>(
+    mut self,
+    version: HttpVersion,
+    destination: &T,
+  ) -> io::Result<()> {
+    if version == HttpVersion::Http09 {
+      if let Some(body) = self.body.as_mut() {
+        body.write_to(destination)?;
+      }
+
+      return Ok(());
+    }
+
+    destination.write(version.as_bytes())?;
     destination.write(b" ")?;
     destination.write(self.status_code.code_as_utf())?;
     destination.write(b" ")?;
