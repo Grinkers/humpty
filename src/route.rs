@@ -1,20 +1,36 @@
 //! Provides functionality for handling app routes.
 
-use crate::humpty_builder::{PathAwareRequestHandler, RequestHandler, WebsocketHandler};
+use crate::humpty_builder::{default_error_handler, default_not_found_handler, ErrorHandler, NotFoundHandler, PathAwareRequestHandler, RequestHandler, WebsocketHandler};
 use crate::krauss;
-use crate::percent::PercentDecode;
-
-use std::fs::metadata;
-use std::path::PathBuf;
+use std::io;
+use crate::handler_traits::{RequestFilter, ResponseFilter, Router, RouterFilter};
+use crate::http::{Request, Response};
 
 /// Represents a sub-app to run for a specific host.
-pub struct SubApp {
-  /// The host to process requests for.
-  pub host: String,
+pub struct HumptyRouter {
+  /// This filter/predicate will decide if the router should even serve the request at all
+  pub router_filter: Box<dyn RouterFilter>,
+
+  /// Filters that run before the route is matched.
+  /// These filters may modify the path of the request to affect routing decision.
+  pub pre_routing_filters: Vec<Box<dyn RequestFilter>>,
+  /// Filters that run once the routing decision has been made.
+  /// These filters only run if there is an actual endpoint.
+  pub routing_filters: Vec<Box<dyn RequestFilter>>,
+
+  /// These filters run on the response after the actual endpoint (or the error handler) has been called.
+  pub response_filters: Vec<Box<dyn ResponseFilter>>,
+
   /// The routes to process requests for and their handlers.
   pub routes: Vec<RouteHandler>,
+
   /// The routes to process WebSocket requests for and their handlers.
   pub websocket_routes: Vec<WebsocketRouteHandler>,
+
+  /// Called when no route has been found in the router.
+  pub not_found_handler: NotFoundHandler,
+  /// Called when an error in any of the above occurs.
+  pub error_handler: ErrorHandler,
 }
 
 /// Encapsulates a route and its handler.
@@ -33,17 +49,36 @@ pub struct WebsocketRouteHandler {
   pub handler: Box<dyn WebsocketHandler>,
 }
 
-impl Default for SubApp {
+impl Default for HumptyRouter {
   fn default() -> Self {
-    SubApp { host: "*".to_string(), routes: Vec::new(), websocket_routes: Vec::new() }
+    HumptyRouter { router_filter: Box::new(default_pre_routing_filter),
+      pre_routing_filters: Vec::default(),
+      routing_filters: Vec::default(),
+      response_filters: Vec::default(),
+      routes: Vec::new(),
+      websocket_routes: Vec::new(),
+      not_found_handler: default_not_found_handler,
+      error_handler: default_error_handler
+    }
   }
 }
 
-impl SubApp {
+impl HumptyRouter {
   /// Create a new sub-app with no routes.
   pub fn new() -> Self {
-    SubApp::default()
+    HumptyRouter::default()
   }
+
+  /// Adds a route and associated handler to the sub-app.
+  /// Routes can include wildcards, for example `/blog/*`.
+  pub fn with_pre_routing_filter<T>(mut self, filter: T) -> Self
+  where
+      T: RouterFilter + 'static,
+  {
+    self.router_filter = Box::new(filter);
+    self
+  }
+
 
   /// Adds a route and associated handler to the sub-app.
   /// Routes can include wildcards, for example `/blog/*`.
@@ -81,6 +116,47 @@ impl SubApp {
       .push(WebsocketRouteHandler { route: route.to_string(), handler: Box::new(handler) });
     self
   }
+
+  fn serve_outer(&self, request: &Request) -> io::Result<Option<Response>> {
+    if !self.router_filter.filter(request)? {
+      return Ok(None);
+    }
+
+    let mut resp = self.serve_inner(request).or_else(|e| (self.error_handler)(request, e))?;
+    for filter in self.response_filters.iter() {
+      resp = filter.filter(request, resp).or_else(|e| (self.error_handler)(request, e))?;
+    }
+
+    Ok(Some(resp))
+  }
+  fn serve_inner(&self, request: &Request) -> io::Result<Response> {
+    for filter in self.pre_routing_filters.iter() {
+      if let Some(resp) = filter.filter(request)? {
+        return Ok(resp);
+      }
+    }
+
+    if let Some(handler) = self
+        .routes // Get the routes of the sub-app
+        .iter() // Iterate over the routes
+        .find(|route| route.route.route_matches(&request.path)) {
+      for filter in self.routing_filters.iter() {
+        if let Some(resp) = filter.filter(request)? {
+          return Ok(resp);
+        }
+      }
+
+      return Ok(handler.handler.serve(request.clone())?); //TODO get rid of this clone
+    }
+
+    (self.not_found_handler)(request)
+  }
+}
+
+impl Router for HumptyRouter {
+  fn serve(&self, request: &Request) -> io::Result<Option<Response>> {
+    self.serve_outer(request)
+  }
 }
 
 /// An object that can represent a route, currently only `String`.
@@ -97,52 +173,6 @@ impl Route for String {
   }
 }
 
-/// A located file or directory path.
-pub enum LocatedPath {
-  /// A directory was located.
-  Directory,
-  /// A file was located at the given path.
-  File(PathBuf),
-}
-
-/// Attempts to find a given path.
-/// If the path itself is not found, attempts to find index files within it.
-/// If these are not found, returns `None`.
-pub fn try_find_path(
-  directory: &str,
-  request_path: &str,
-  index_files: &[&str],
-) -> Option<LocatedPath> {
-  let request_path = String::from_utf8(request_path.percent_decode()?).ok()?;
-
-  // Avoid path traversal exploits
-  if request_path.contains("..") || request_path.contains(':') {
-    return None;
-  }
-
-  let request_path = request_path.trim_start_matches('/');
-  let directory = directory.trim_end_matches('/');
-
-  if request_path.ends_with('/') || request_path.is_empty() {
-    for filename in index_files {
-      let path = format!("{}/{}{}", directory, request_path, *filename);
-      if let Ok(meta) = metadata(&path) {
-        if meta.is_file() {
-          return Some(LocatedPath::File(PathBuf::from(path).canonicalize().unwrap()));
-        }
-      }
-    }
-  } else {
-    let path = format!("{}/{}", directory, request_path);
-
-    if let Ok(meta) = metadata(&path) {
-      if meta.is_file() {
-        return Some(LocatedPath::File(PathBuf::from(path).canonicalize().unwrap()));
-      } else if meta.is_dir() {
-        return Some(LocatedPath::Directory);
-      }
-    }
-  }
-
-  None
+fn default_pre_routing_filter(_request: &Request) -> io::Result<bool> {
+  Ok(true)
 }

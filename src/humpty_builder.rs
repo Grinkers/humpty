@@ -2,7 +2,7 @@
 
 use crate::http::response::Response;
 use crate::http::status::StatusCode;
-use crate::route::SubApp;
+use crate::route::HumptyRouter;
 use crate::thread::pool::ThreadPool;
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -15,8 +15,7 @@ use std::{io, thread};
 /// Represents the Humpty app.
 pub struct HumptyBuilder {
   thread_pool: ThreadPool,
-  subapps: Vec<SubApp>,
-  default_subapp: SubApp,
+  routers: Vec<HumptyRouter>,
   error_handler: ErrorHandler,
   not_found_handler: NotFoundHandler,
   connection_timeout: Option<Duration>,
@@ -52,8 +51,7 @@ impl Default for HumptyBuilder {
       // For ordinary http 1.1 its not needed.
       #[deprecated]
       thread_pool: ThreadPool::new(32),
-      subapps: Vec::new(),
-      default_subapp: SubApp::default(),
+      routers: Vec::new(),
       error_handler: default_error_handler,
       not_found_handler: default_not_found_handler,
       connection_timeout: None,
@@ -77,8 +75,7 @@ impl HumptyBuilder {
   {
     let socket = TcpListener::bind(addr.clone())?;
     let server = Arc::new(HumptyServer::new(
-      self.default_subapp,
-      self.subapps,
+      self.routers,
       self.error_handler,
       self.not_found_handler,
       self.connection_timeout,
@@ -135,8 +132,7 @@ impl HumptyBuilder {
   /// This method creates the HttpServer from the builder.
   pub fn build(self) -> HumptyServer {
     HumptyServer::new(
-      self.default_subapp,
-      self.subapps,
+      self.routers,
       self.error_handler,
       self.not_found_handler,
       self.connection_timeout,
@@ -149,55 +145,20 @@ impl HumptyBuilder {
   /// ## Panics
   /// This function will panic if the host is equal to `*`, since this is the default host.
   /// If you want to add a route to every host, simply add it directly to the main app.
-  pub fn with_host(mut self, host: &str, mut handler: SubApp) -> Self {
-    if host == "*" {
-      panic!("Cannot add a sub-app with wildcard `*`");
-    }
-
-    handler.host = host.to_string();
-    self.subapps.push(handler);
-
+  pub fn with_router(mut self, handler: HumptyRouter) -> Self {
+    self.routers.push(handler);
     self
   }
 
-  /// Adds a route and associated handler to the server.
-  /// Routes can include wildcards, for example `/blog/*`.
-  pub fn with_route<T>(mut self, route: &str, handler: T) -> Self
-  where
-    T: RequestHandler + 'static,
-  {
-    self.default_subapp = self.default_subapp.with_route(route, handler);
+
+  /// Adds a new router to the server and calls the closure with the new router so it can be configured.
+  pub fn router<T: FnOnce(HumptyRouter) -> HumptyRouter>(mut self, builder: T) -> Self {
+    let def = HumptyRouter::default();
+    self.routers.push(builder(def));
     self
   }
 
-  /// Adds a path-aware route and associated handler to the server.
-  /// Routes can include wildcards, for example `/blog/*`.
-  /// Will also pass the route to the handler at runtime.
-  pub fn with_path_aware_route<T>(mut self, route: &'static str, handler: T) -> Self
-  where
-    T: PathAwareRequestHandler + 'static,
-  {
-    self.default_subapp = self.default_subapp.with_path_aware_route(route, handler);
-    self
-  }
 
-  /// Adds a WebSocket route and associated handler to the server.
-  /// Routes can include wildcards, for example `/ws/*`.
-  /// The handler is passed the stream and the request which triggered its calling.
-  pub fn with_websocket_route<T>(mut self, route: &str, handler: T) -> Self
-  where
-    T: WebsocketHandler + 'static,
-  {
-    self.default_subapp = self.default_subapp.with_websocket_route(route, handler);
-    self
-  }
-
-  /// Sets the default sub-app for the server.
-  /// This overrides all the routes added, as they will be replaced by the routes in the default sub-app.
-  pub fn with_default_subapp(mut self, subapp: SubApp) -> Self {
-    self.default_subapp = subapp;
-    self
-  }
 
   /// Registers a shutdown signal to gracefully shutdown the app, ending the run/run_tls loop.
   pub fn with_shutdown(mut self, shutdown_receiver: Receiver<()>) -> Self {

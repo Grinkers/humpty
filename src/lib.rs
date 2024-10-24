@@ -17,4 +17,4 @@ mod thread;
 mod util;
 
 pub use humpty_builder::HumptyBuilder;
-pub use route::SubApp;
+pub use route::HumptyRouter;

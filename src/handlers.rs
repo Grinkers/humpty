@@ -3,14 +3,23 @@
 use crate::http::headers::HeaderType;
 use crate::http::response_body::ResponseBody;
 use crate::http::{Request, Response, StatusCode};
-use crate::route::{try_find_path, LocatedPath};
 
-use std::fs::File;
+use std::fs::{metadata, File};
 use std::io;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use crate::percent::PercentDecode;
 
 const INDEX_FILES: [&str; 2] = ["index.html", "index.htm"];
+
+/// A located file or directory path.
+pub enum LocatedPath {
+  /// A directory was located.
+  Directory,
+  /// A file was located at the given path.
+  File(PathBuf),
+}
+
 
 fn try_file_open(path: &PathBuf) -> io::Result<Response> {
   File::open(path).and_then(ResponseBody::from_file).map(Response::ok).or_else(|e| {
@@ -76,6 +85,48 @@ pub fn serve_dir(directory_path: &'static str) -> impl Fn(Request, &str) -> io::
       Ok(Response::empty(StatusCode::NotFound))
     }
   }
+}
+
+/// Attempts to find a given path.
+/// If the path itself is not found, attempts to find index files within it.
+/// If these are not found, returns `None`.
+pub fn try_find_path(
+  directory: &str,
+  request_path: &str,
+  index_files: &[&str],
+) -> Option<LocatedPath> {
+  let request_path = String::from_utf8(request_path.percent_decode()?).ok()?;
+
+  // Avoid path traversal exploits
+  if request_path.contains("..") || request_path.contains(':') {
+    return None;
+  }
+
+  let request_path = request_path.trim_start_matches('/');
+  let directory = directory.trim_end_matches('/');
+
+  if request_path.ends_with('/') || request_path.is_empty() {
+    for filename in index_files {
+      let path = format!("{}/{}{}", directory, request_path, *filename);
+      if let Ok(meta) = metadata(&path) {
+        if meta.is_file() {
+          return Some(LocatedPath::File(PathBuf::from(path).canonicalize().unwrap()));
+        }
+      }
+    }
+  } else {
+    let path = format!("{}/{}", directory, request_path);
+
+    if let Ok(meta) = metadata(&path) {
+      if meta.is_file() {
+        return Some(LocatedPath::File(PathBuf::from(path).canonicalize().unwrap()));
+      } else if meta.is_dir() {
+        return Some(LocatedPath::Directory);
+      }
+    }
+  }
+
+  None
 }
 
 /// Redirects requests to the given location with status code 301.

@@ -61,3 +61,39 @@ where
     self(request, route)
   }
 }
+
+
+pub trait RouterFilter: Send + Sync {
+  fn filter(&self, request: &Request) -> io::Result<bool>;
+}
+
+impl<F: Fn(&Request) -> io::Result<bool> + Send + Sync> RouterFilter for F {
+  fn filter(&self, request: &Request) -> io::Result<bool> {
+    self(request)
+  }
+}
+
+pub trait RequestFilter: Send + Sync {
+  fn filter(&self, request: &Request) -> io::Result<Option<Response>>;
+}
+
+impl<F: Fn(&Request) -> io::Result<Option<Response>> + Send + Sync> RequestFilter for F {
+  fn filter(&self, request: &Request) -> io::Result<Option<Response>> {
+    self(request)
+  }
+}
+
+pub trait ResponseFilter: Send + Sync {
+  fn filter(&self, request: &Request, response: Response) -> io::Result<Response>;
+}
+
+impl<F: Fn(&Request, Response) -> io::Result<Response> + Send + Sync> ResponseFilter for F {
+  fn filter(&self, request: &Request, response: Response) -> io::Result<Response> {
+    self(request, response)
+  }
+}
+
+pub trait Router {
+  fn serve(&self, request: &Request) -> io::Result<Option<Response>>;
+
+}

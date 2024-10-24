@@ -2,31 +2,27 @@ use crate::http::headers::HeaderType;
 use crate::http::request::HttpVersion;
 use crate::http::{Request, Response, StatusCode};
 use crate::humpty_builder::{ErrorHandler, NotFoundHandler};
-use crate::krauss::wildcard_match;
-use crate::route::{Route, RouteHandler};
+use crate::route::{Route};
 use crate::stream::{ConnectionStream, IntoConnectionStream};
-use crate::{error_log, trace_log, SubApp};
+use crate::{error_log, trace_log, HumptyRouter};
 use std::io;
 use std::time::Duration;
+use crate::handler_traits::Router;
 
 pub struct HumptyServer {
-  default_subapp: SubApp,
   error_handler: ErrorHandler,
   not_found_handler: NotFoundHandler,
   timeout: Option<Duration>,
-
-  //TODO Questionable if we should keep this. This is only really useful if you develop something like nginx/apache2 aka a Reverse Proxy...  Just use nginx or apache2?
-  sub_apps: Vec<SubApp>,
+  routers: Vec<HumptyRouter>,
 }
 impl HumptyServer {
   pub(crate) fn new(
-    default_subapp: SubApp,
-    sub_apps: Vec<SubApp>,
+    sub_apps: Vec<HumptyRouter>,
     error_handler: ErrorHandler,
     not_found_handler: NotFoundHandler,
     timeout: Option<Duration>,
   ) -> Self {
-    HumptyServer { default_subapp, error_handler, not_found_handler, timeout, sub_apps }
+    HumptyServer { error_handler, not_found_handler, timeout, routers: sub_apps }
   }
 
   pub fn handle_connection<T: IntoConnectionStream>(&self, stream: T) -> io::Result<()> {
@@ -49,9 +45,13 @@ impl HumptyServer {
 
         trace_log!("WebsocketConnectionRequested");
 
-        self.call_websocket_handler(&request, stream.as_ref());
+        if self.call_websocket_handler(&request, stream.as_ref())? {
+          trace_log!("WebsocketConnectionClosed");
+          return Ok(());
+        }
 
-        trace_log!("WebsocketConnectionClosed");
+        // TODO how can I tell a websocket request gracefully that there is no one here for it? HTTP 404?, this just shuts the socket.
+        trace_log!("WebsocketConnectionClosed Not found");
         return Ok(());
       }
 
@@ -63,12 +63,24 @@ impl HumptyServer {
           .map(|e| e.eq_ignore_ascii_case("keep-alive"))
           .unwrap_or_default();
 
-      let mut response = match self.get_handler(&request) {
-        Some(handler) => handler.handler.serve(request.clone()), //TODO get rid of this clone
-        None => (self.not_found_handler)(&request),
+
+      let mut response = None;
+      for router in self.routers.iter() {
+        response = Some(match router.serve(&request) {
+          Ok(Some(resp)) => resp,
+          Ok(None) => continue,
+          Err(error) => (self.error_handler)(&request, error).unwrap_or_else(|e| self.fallback_error_handler(&request, e))
+        });
+
+        break;
       }
-      .or_else(|e| (self.error_handler)(&request, e))
-      .unwrap_or_else(|e| self.fallback_error_handler(&request, e));
+
+      let mut response = response.unwrap_or_else(|| {
+        match (self.not_found_handler)(&request) {
+          Ok(res) => res,
+          Err(error) => (self.error_handler)(&request, error).unwrap_or_else(|e| self.fallback_error_handler(&request, e))
+        }
+      });
 
       request.ensure_consumed()?;
 
@@ -109,58 +121,22 @@ impl HumptyServer {
     Ok(())
   }
 
-  fn call_websocket_handler(&self, request: &Request, stream: &dyn ConnectionStream) {
-    // Iterate over the sub-apps and find the one which matches the host
-    if let Some(host) = request.headers.get(&HeaderType::Host) {
-      if let Some(subapp) = self.sub_apps.iter().find(|subapp| wildcard_match(&subapp.host, host)) {
-        // If the sub-app has a handler for this route, call it
-        if let Some(handler) = subapp
+  fn call_websocket_handler(&self, request: &Request, stream: &dyn ConnectionStream) -> io::Result<bool> {
+    for router in &self.routers {
+      if !router.router_filter.filter(request)? {
+        continue;
+      }
+
+      if let Some(handler) = router
           .websocket_routes // Get the WebSocket routes of the sub-app
           .iter() // Iterate over the routes
-          .find(|route| route.route.route_matches(&request.path))
-        {
-          handler.handler.serve(request.clone(), stream.new_ref());
-          return;
-        }
+          .find(|route| route.route.route_matches(&request.path)) {
+        handler.handler.serve(request.clone(), stream.new_ref());
+        return Ok(true);
       }
     }
 
-    // If no sub-app was found, try to use the handler on the default sub-app
-    if let Some(handler) = self
-      .default_subapp
-      .websocket_routes
-      .iter()
-      .find(|route| route.route.route_matches(&request.path))
-    {
-      handler.handler.serve(request.clone(), stream.new_ref())
-    }
-  }
-
-  /// Gets the correct handler for the given request.
-  fn get_handler(&self, request: &Request) -> Option<&RouteHandler> {
-    // Iterate over the sub-apps and find the one which matches the host
-    if let Some(host) = request.headers.get(&HeaderType::Host) {
-      if let Some(subapp) = self.sub_apps.iter().find(|subapp| wildcard_match(&subapp.host, host)) {
-        // If the sub-app has a handler for this route, call it
-        if let Some(handler) = subapp
-          .routes // Get the routes of the sub-app
-          .iter() // Iterate over the routes
-          .find(|route| route.route.route_matches(&request.path))
-        // Find the route that matches
-        {
-          return Some(handler);
-        }
-      }
-    }
-
-    // If no sub-app was found, try to use the handler on the default sub-app
-    if let Some(handler) =
-      self.default_subapp.routes.iter().find(|route| route.route.route_matches(&request.path))
-    {
-      return Some(handler);
-    }
-
-    None
+    Ok(false)
   }
 
   fn fallback_error_handler(&self, request: &Request, error: io::Error) -> Response {

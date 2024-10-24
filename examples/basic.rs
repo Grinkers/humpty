@@ -6,11 +6,12 @@ use std::io;
 use std::io::Read;
 
 fn main() -> Result<(), Box<dyn Error>> {
-  let app = HumptyBuilder::default()
-    .with_route("/", home)
-    .with_route("/contact", contact)
-    .with_route("/ping", pong)
-    .with_route("/*", generic);
+  let app = HumptyBuilder::default().router(|router|
+    router.with_route("/", home)
+        .with_route("/contact", contact)
+        .with_route("/ping", pong)
+        .with_route("/*", generic)
+  );
 
   app.run("0.0.0.0:8080")?;
 
