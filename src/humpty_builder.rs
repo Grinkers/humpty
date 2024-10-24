@@ -5,9 +5,6 @@ use crate::http::status::StatusCode;
 use crate::route::SubApp;
 use crate::thread::pool::ThreadPool;
 
-#[cfg(feature = "log")]
-use log::trace;
-use log::{error, info};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -29,6 +26,7 @@ pub struct HumptyBuilder {
 pub use crate::handler_traits::*;
 use crate::http::Request;
 use crate::humpty_server::HumptyServer;
+use crate::{error_log, info_log, trace_log};
 
 /// Represents a function able to handle an error.
 /// The first parameter of type `Option<Request>` will be `Some` if the request could be parsed.
@@ -99,28 +97,24 @@ impl HumptyBuilder {
         match stream {
           Ok(stream) => {
             // Check that the client is allowed to connect
-            #[cfg(feature = "log")]
-            trace!("ConnectionSuccess {:?}", stream.peer_addr());
+            trace_log!("ConnectionSuccess {:?}", stream.peer_addr());
             let server_clone = server.clone();
             // Spawn a new thread to handle the connection
             self.thread_pool.execute(move || {
               if let Err(e) = server_clone.handle_connection(stream) {
-                trace!("ConnectionFailure {:?}", e);
+                trace_log!("ConnectionFailure {:?}", e);
               } else {
-                trace!("ConnectionSuccess");
+                trace_log!("ConnectionSuccess");
               }
             });
           }
-          #[cfg(feature = "log")]
           Err(e) => {
             // TODO this will be removed eventually.
             // Having a connection filter that acts as a "firewall" here is not the best idea.
             // Once we feed the connections externally instead of doing the listening
             // here this becomes redundant anyways.
-            trace!("ConnectionDenied {:?}", e);
+            trace_log!("ConnectionDenied {:?}", e);
           }
-          #[cfg(not(feature = "log"))]
-          Err(_) => {}
         }
       }
       self.thread_pool.stop();
@@ -233,12 +227,12 @@ impl HumptyBuilder {
 /// The default error handler for every Humpty app.
 /// This can be overridden by using the `with_error_handler` method when building the app.
 pub(crate) fn default_error_handler(request: &Request, error: io::Error) -> io::Result<Response> {
-  error!("Internal Server Error {} {} {:?}", request.method, request.path.as_str(), error);
+  error_log!("Internal Server Error {} {} {:?}", &request.method, request.path.as_str(), error);
   Ok(Response::empty(StatusCode::InternalServerError))
 }
 
 pub(crate) fn default_not_found_handler(request: &Request) -> io::Result<Response> {
-  info!("Not found {} {}", request.method, request.path.as_str());
+  info_log!("Not found {} {}", &request.method, request.path.as_str());
   Ok(Response::empty(StatusCode::NotFound))
 }
 

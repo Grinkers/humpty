@@ -1,14 +1,15 @@
 //! Provides thread pool functionality.
 use crate::thread::recovery::{PanicMarker, RecoveryThread};
 
-#[cfg(feature = "log")]
-use log::trace;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{Builder, JoinHandle};
+#[cfg(feature = "log")]
+use crate::trace_log;
+
 
 /// The number of milliseconds a task can be waiting in the pool before the pool is considered overloaded.
-#[cfg(feature = "log")] //This constant is only used in logging for now...
+#[cfg(feature = "log")] //This constant is only used for logging.
 const OVERLOAD_THRESHOLD: u128 = 100;
 
 /// Represents a pool of threads.
@@ -144,7 +145,7 @@ impl Thread {
             let time_in_pool = message.time.elapsed().as_millis();
 
             if time_in_pool > OVERLOAD_THRESHOLD {
-              trace!("ThreadPoolOverload");
+              trace_log!("ThreadPoolOverload");
             }
           }
 

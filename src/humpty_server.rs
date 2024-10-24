@@ -5,8 +5,7 @@ use crate::humpty_builder::{ErrorHandler, NotFoundHandler};
 use crate::krauss::wildcard_match;
 use crate::route::{Route, RouteHandler};
 use crate::stream::{ConnectionStream, IntoConnectionStream};
-use crate::SubApp;
-use log::{error, trace};
+use crate::{error_log, trace_log, SubApp};
 use std::io;
 use std::time::Duration;
 
@@ -48,13 +47,11 @@ impl HumptyServer {
       {
         //Http 1.0 or 0.9 does not have web sockets
 
-        #[cfg(feature = "log")]
-        trace!("WebsocketConnectionRequested");
+        trace_log!("WebsocketConnectionRequested");
 
         self.call_websocket_handler(&request, stream.as_ref());
 
-        #[cfg(feature = "log")]
-        trace!("WebsocketConnectionClosed");
+        trace_log!("WebsocketConnectionClosed");
         return Ok(());
       }
 
@@ -83,8 +80,7 @@ impl HumptyServer {
         };
 
         if !previous_headers.is_empty() {
-          #[cfg(feature = "log")]
-          trace!("Endpoint has set banned header 'Connection' {:?}", previous_headers);
+          trace_log!("Endpoint has set banned header 'Connection' {:?}", previous_headers);
           return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Endpoint has set banned header 'Connection'",
@@ -92,30 +88,24 @@ impl HumptyServer {
         }
       }
 
-      #[cfg(feature = "log")]
-      trace!("RequestRespondedWith HTTP {}", response.status_code.code());
+      trace_log!("RequestRespondedWith HTTP {}", response.status_code.code());
 
       response.write_to(request.version, stream.as_stream_write()).inspect_err(|e| {
-        #[cfg(feature = "log")]
-        trace!("response.write_to {}", e)
+        trace_log!("response.write_to {}", e);
       })?;
 
-      #[cfg(feature = "log")]
-      trace!("RequestServedSuccess");
+      trace_log!("RequestServedSuccess");
 
       // If the request specified to keep the connection open, respect this
       if !keep_alive {
-        #[cfg(feature = "log")]
-        trace!("NoKeepAlive");
+        trace_log!("NoKeepAlive");
         break;
       }
 
-      #[cfg(feature = "log")]
-      trace!("KeepAliveRespected");
+      trace_log!("KeepAliveRespected");
     }
 
-    #[cfg(feature = "log")]
-    trace!("ConnectionClosed");
+    trace_log!("ConnectionClosed");
     Ok(())
   }
 
@@ -174,9 +164,9 @@ impl HumptyServer {
   }
 
   fn fallback_error_handler(&self, request: &Request, error: io::Error) -> Response {
-    error!(
+    error_log!(
       "Error handler failed. Will respond with empty Internal Server Error {} {} {:?}",
-      request.method,
+      &request.method,
       request.path.as_str(),
       error
     );
