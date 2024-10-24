@@ -16,7 +16,7 @@ pub enum Method {
   /// The `OPTIONS` method.
   Options,
   /// Anything else your heart desires.
-  Custom(String)
+  Custom(String),
 }
 
 impl Method {
@@ -34,7 +34,7 @@ impl Method {
       "PUT" => Self::Put,
       "DELETE" => Self::Delete,
       "OPTIONS" => Self::Options,
-      _ => Self::Custom(name.to_string())
+      _ => Self::Custom(name.to_string()),
     }
   }
 }

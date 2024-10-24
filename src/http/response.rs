@@ -4,12 +4,12 @@ use crate::http::cookie::SetCookie;
 use crate::http::headers::{HeaderLike, HeaderType, Headers};
 use crate::http::status::StatusCode;
 
+use crate::http::request::HttpVersion;
 use crate::http::response_body::{ReadAndSeek, ResponseBody};
 use crate::stream::ConnectionStreamWrite;
 use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
-use crate::http::request::HttpVersion;
 
 /// Represents a response from the server.
 /// Implements `Into<Vec<u8>>` so can be serialised into bytes to transmit.
@@ -62,17 +62,13 @@ impl Response {
   where
     T: AsRef<[u8]>,
   {
-    Self {
-      status_code,
-      headers: Headers::new(),
-      body: Some(ResponseBody::from_slice(&bytes)),
-    }
+    Self { status_code, headers: Headers::new(), body: Some(ResponseBody::from_slice(&bytes)) }
   }
 
   /// Creates a new response object with the given status code.
   /// Automatically sets the HTTP version to "HTTP/1.1", sets no headers, and creates an empty body.
   pub fn empty(status_code: StatusCode) -> Self {
-    Self {status_code, headers: Headers::new(), body: None }
+    Self { status_code, headers: Headers::new(), body: None }
   }
 
   /// HTTP 200 OK with body.
@@ -159,13 +155,17 @@ impl Response {
   ///
   /// Write the request to a streaming output. This consumes the request object.
   ///
-  pub fn write_to<T: ConnectionStreamWrite + ?Sized>(mut self, version: HttpVersion, destination: &T) -> io::Result<()> {
+  pub fn write_to<T: ConnectionStreamWrite + ?Sized>(
+    mut self,
+    version: HttpVersion,
+    destination: &T,
+  ) -> io::Result<()> {
     if version == HttpVersion::Http09 {
       if let Some(body) = self.body.as_mut() {
         body.write_to(destination)?;
       }
 
-      return Ok(())
+      return Ok(());
     }
 
     destination.write(version.as_bytes())?;

@@ -1,6 +1,5 @@
 //! Provides a number of useful handlers for Humpty apps.
 
-
 use crate::http::headers::HeaderType;
 use crate::http::response_body::ResponseBody;
 use crate::http::{Request, Response, StatusCode};
@@ -14,16 +13,13 @@ use std::path::PathBuf;
 const INDEX_FILES: [&str; 2] = ["index.html", "index.htm"];
 
 fn try_file_open(path: &PathBuf) -> io::Result<Response> {
-  File::open(path)
-      .and_then(ResponseBody::from_file)
-      .map(Response::ok)
-      .or_else(|e| {
-        if e.kind() == ErrorKind::NotFound {
-          Ok(Response::not_found())
-        } else {
-          Err(e)
-        }
-      })
+  File::open(path).and_then(ResponseBody::from_file).map(Response::ok).or_else(|e| {
+    if e.kind() == ErrorKind::NotFound {
+      Ok(Response::not_found())
+    } else {
+      Err(e)
+    }
+  })
 }
 
 /// Serve the specified file, or a default error 404 if not found.
@@ -41,7 +37,9 @@ pub fn serve_file(file_path: &'static str) -> impl Fn(Request) -> io::Result<Res
 ///     for example a request to `/images/ferris.png` will map to the file `./static/images/ferris.png`.
 ///
 /// This is **not** equivalent to `serve_dir`, as `serve_dir` respects index files within nested directories.
-pub fn serve_as_file_path(directory_path: &'static str) -> impl Fn(Request) -> io::Result<Response> {
+pub fn serve_as_file_path(
+  directory_path: &'static str,
+) -> impl Fn(Request) -> io::Result<Response> {
   move |request: Request| {
     let directory_path = directory_path.strip_suffix('/').unwrap_or(directory_path);
     let file_path = request.path.strip_prefix('/').unwrap_or(&request.path);
@@ -68,8 +66,10 @@ pub fn serve_dir(directory_path: &'static str) -> impl Fn(Request, &str) -> io::
 
     if let Some(located) = located {
       match located {
-        LocatedPath::Directory => Ok(Response::empty(StatusCode::MovedPermanently)
-          .with_header(HeaderType::Location, format!("{}/", &request.path))),
+        LocatedPath::Directory => Ok(
+          Response::empty(StatusCode::MovedPermanently)
+            .with_header(HeaderType::Location, format!("{}/", &request.path)),
+        ),
         LocatedPath::File(path) => try_file_open(&path),
       }
     } else {

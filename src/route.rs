@@ -51,10 +51,7 @@ impl SubApp {
   where
     T: RequestHandler + 'static,
   {
-    self.routes.push(RouteHandler {
-      route: route.to_string(),
-      handler: Box::new(handler),
-    });
+    self.routes.push(RouteHandler { route: route.to_string(), handler: Box::new(handler) });
     self
   }
 

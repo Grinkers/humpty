@@ -1,8 +1,8 @@
 //! Defines traits for handler functions.
 
-use std::io;
 use crate::http::{Request, Response};
 use crate::stream::ConnectionStream;
+use std::io;
 
 /// Represents a function able to handle a WebSocket handshake and consequent data frames.
 pub trait WebsocketHandler: Send + Sync {
@@ -33,7 +33,7 @@ pub trait RequestHandler: Send + Sync {
 
 impl<F> RequestHandler for F
 where
-    F: Fn(Request) -> io::Result<Response> + Send + Sync,
+  F: Fn(Request) -> io::Result<Response> + Send + Sync,
 {
   fn serve(&self, request: Request) -> io::Result<Response> {
     self(request)

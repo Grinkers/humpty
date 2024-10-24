@@ -116,7 +116,9 @@ fn handshake(
     .with_header("Sec-WebSocket-Accept", sec_websocket_accept);
 
   // Transmit the handshake response
-  response.write_to(request.version, stream.as_stream_write()).map_err(|_| WebsocketError::WriteError)?;
+  response
+    .write_to(request.version, stream.as_stream_write())
+    .map_err(|_| WebsocketError::WriteError)?;
 
   Ok(())
 }

@@ -7,10 +7,10 @@ use humpty::http::headers::{HeaderType, Headers};
 use humpty::http::method::Method;
 use humpty::http::Request;
 
+use humpty::http::request::HttpVersion;
 use humpty::stream::IntoConnectionStream;
 use std::collections::VecDeque;
 use std::iter::FromIterator;
-use humpty::http::request::HttpVersion;
 
 #[test]
 fn test_request_from_stream() {

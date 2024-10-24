@@ -122,8 +122,8 @@ impl Default for AsyncWebsocketApp {
 
     let (message_sender, outgoing_messages) = channel();
 
-    let humpty_app =
-      HumptyBuilder::new_with_config(1).with_websocket_route("/*", async_websocket_handler(connect_hook));
+    let humpty_app = HumptyBuilder::new_with_config(1)
+      .with_websocket_route("/*", async_websocket_handler(connect_hook));
 
     Self {
       humpty_link: HumptyLink::Internal(

@@ -30,7 +30,8 @@ const HTML: &str = r##"
 </html>"##;
 
 fn main() -> Result<(), Box<dyn Error>> {
-  let app: HumptyBuilder = HumptyBuilder::default().with_route("/", home).with_route("/wildcard/*", wildcard);
+  let app: HumptyBuilder =
+    HumptyBuilder::default().with_route("/", home).with_route("/wildcard/*", wildcard);
 
   app.run("127.0.0.1:8080")?;
 

@@ -2,18 +2,18 @@
 
 use crate::http::response::Response;
 use crate::http::status::StatusCode;
-use crate::route::{SubApp};
+use crate::route::SubApp;
 use crate::thread::pool::ThreadPool;
 
 #[cfg(feature = "log")]
 use log::trace;
+use log::{error, info};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use std::{io, thread};
 use std::time::Duration;
-use log::{error, info};
+use std::{io, thread};
 
 /// Represents the Humpty app.
 pub struct HumptyBuilder {
@@ -78,7 +78,13 @@ impl HumptyBuilder {
     A: ToSocketAddrs + Clone,
   {
     let socket = TcpListener::bind(addr.clone())?;
-    let server = Arc::new(HumptyServer::new(self.default_subapp, self.subapps, self.error_handler, self.not_found_handler, self.connection_timeout));
+    let server = Arc::new(HumptyServer::new(
+      self.default_subapp,
+      self.subapps,
+      self.error_handler,
+      self.not_found_handler,
+      self.connection_timeout,
+    ));
     self.thread_pool.start();
 
     // Shared shutdown signal between socket.incoming() and shutdown signal receiver.
@@ -93,17 +99,17 @@ impl HumptyBuilder {
         match stream {
           Ok(stream) => {
             // Check that the client is allowed to connect
-              #[cfg(feature = "log")]
-              trace!("ConnectionSuccess {:?}", stream.peer_addr());
-              let server_clone = server.clone();
-              // Spawn a new thread to handle the connection
-              self.thread_pool.execute(move || {
-                if let Err(e) = server_clone.handle_connection(stream) {
-                  trace!("ConnectionFailure {:?}", e);
-                } else {
-                  trace!("ConnectionSuccess");
-                }
-              });
+            #[cfg(feature = "log")]
+            trace!("ConnectionSuccess {:?}", stream.peer_addr());
+            let server_clone = server.clone();
+            // Spawn a new thread to handle the connection
+            self.thread_pool.execute(move || {
+              if let Err(e) = server_clone.handle_connection(stream) {
+                trace!("ConnectionFailure {:?}", e);
+              } else {
+                trace!("ConnectionSuccess");
+              }
+            });
           }
           #[cfg(feature = "log")]
           Err(e) => {
@@ -132,13 +138,16 @@ impl HumptyBuilder {
     Ok(())
   }
 
-
   /// This method creates the HttpServer from the builder.
   pub fn build(self) -> HumptyServer {
-    HumptyServer::new(self.default_subapp, self.subapps, self.error_handler, self.not_found_handler, self.connection_timeout)
+    HumptyServer::new(
+      self.default_subapp,
+      self.subapps,
+      self.error_handler,
+      self.not_found_handler,
+      self.connection_timeout,
+    )
   }
-
-
 
   /// Adds a new host sub-app to the server.
   /// The host can contain wildcards, for example `*.example.com`.

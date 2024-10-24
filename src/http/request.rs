@@ -12,7 +12,6 @@ use std::io;
 use std::io::ErrorKind;
 use std::time::Duration;
 
-
 /// Enum for http versions humpty supports.
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub enum HttpVersion {
@@ -26,7 +25,6 @@ pub enum HttpVersion {
 }
 
 impl HttpVersion {
-
   pub(crate) fn as_bytes(&self) -> &[u8] {
     match self {
       HttpVersion::Http09 => &[],
@@ -46,18 +44,15 @@ impl Display for HttpVersion {
   }
 }
 
-
-
 impl HttpVersion {
   fn try_from(value: &str) -> Result<Self, &str> {
     match value {
       "HTTP/1.0" => Ok(HttpVersion::Http10),
       "HTTP/1.1" => Ok(HttpVersion::Http11),
-      _=> Err(value)
+      _ => Err(value),
     }
   }
 }
-
 
 /// Represents a request to the server.
 /// Contains parsed information about the request's data.
@@ -83,7 +78,6 @@ pub struct Request {
   /// Vec of query parameters, key=value in order of appearance.
   //TODO implement this
   //pub query_params: Vec<(String, String)>,
-
 
   /// A list of headers included in the request.
   pub headers: Headers,
@@ -126,8 +120,13 @@ impl Request {
     if let Some(body) = self.body.as_ref() {
       let mut discarding_buffer = [0; 0x1_00_00]; //TODO heap alloc maybe? cfg-if!
       loop {
-        let discarded = body.read(discarding_buffer.as_mut_slice())
-            .or_else(|e| if e.kind() == ErrorKind::UnexpectedEof {Ok(0)} else {Err(e)})?; //Not so unexpected eof!
+        let discarded = body.read(discarding_buffer.as_mut_slice()).or_else(|e| {
+          if e.kind() == ErrorKind::UnexpectedEof {
+            Ok(0)
+          } else {
+            Err(e)
+          }
+        })?; //Not so unexpected eof!
 
         if discarded == 0 {
           return Ok(());
@@ -179,51 +178,74 @@ impl Request {
 
     let status_line = start_line_string.to_string();
 
-    let mut start_line = start_line_string.strip_suffix("\r\n")
-        .ok_or_else(|| io::Error::new(ErrorKind::Other, "status line did not end with CRLF"))?
-        .split(' ');
+    let mut start_line = start_line_string
+      .strip_suffix("\r\n")
+      .ok_or_else(|| io::Error::new(ErrorKind::Other, "status line did not end with CRLF"))?
+      .split(' ');
 
-    let method = Method::from_name(start_line.next().ok_or_else(|| io::Error::new(ErrorKind::Other, "status line did not contain ' ' (0x32) bytes"))?);
+    let method = Method::from_name(start_line.next().ok_or_else(|| {
+      io::Error::new(ErrorKind::Other, "status line did not contain ' ' (0x32) bytes")
+    })?);
 
-    let mut uri_iter = start_line.next()
-        .ok_or_else(|| io::Error::new(ErrorKind::Other, "status line did not contain ' ' (0x32) bytes"))?
-        .splitn(2, '?');
+    let mut uri_iter = start_line
+      .next()
+      .ok_or_else(|| {
+        io::Error::new(ErrorKind::Other, "status line did not contain ' ' (0x32) bytes")
+      })?
+      .splitn(2, '?');
 
     let version = start_line
       .next()
       .map(HttpVersion::try_from)
       .unwrap_or(Ok(HttpVersion::Http09)) //Http 0.9 has no suffix
-      .map_err(|version| io::Error::new(ErrorKind::InvalidData, format!("The http version {version} is not supported.")))?;
+      .map_err(|version| {
+        io::Error::new(
+          ErrorKind::InvalidData,
+          format!("The http version {version} is not supported."),
+        )
+      })?;
 
     if start_line.next().is_some() {
-      return Err(io::Error::new(ErrorKind::InvalidData, "The request status line contains more than two ' ' (0x32) bytes."));
+      return Err(io::Error::new(
+        ErrorKind::InvalidData,
+        "The request status line contains more than two ' ' (0x32) bytes.",
+      ));
     }
-
-
 
     let uri = uri_iter.next().unwrap().to_string();
     let query = uri_iter.next().unwrap_or("").to_string();
-
 
     let mut headers = Headers::new();
 
     if version == HttpVersion::Http09 {
       if method != Method::Get {
-        return Err(io::Error::new(ErrorKind::InvalidData, format!("HTTP 0.9 only supports GET but method was {method}")));
+        return Err(io::Error::new(
+          ErrorKind::InvalidData,
+          format!("HTTP 0.9 only supports GET but method was {method}"),
+        ));
       }
 
       //This is user logic. TODO remove
-      let address = Address::from_headers(&headers, address).map_err(|_| io::Error::new(ErrorKind::Other, "Address::from_headers"))?;
+      let address = Address::from_headers(&headers, address)
+        .map_err(|_| io::Error::new(ErrorKind::Other, "Address::from_headers"))?;
 
-      return Ok(Self { method, path: uri, query, version, headers, body: None, address, status_line })
+      return Ok(Self {
+        method,
+        path: uri,
+        query,
+        version,
+        headers,
+        body: None,
+        address,
+        status_line,
+      });
     }
-
-
 
     loop {
       let mut line_buf: Vec<u8> = Vec::with_capacity(256);
       stream.read_until(0xA, &mut line_buf)?;
-      let line = std::str::from_utf8(&line_buf).map_err(|_| io::Error::new(ErrorKind::Other, "header line is not valid US-ASCII"))?;
+      let line = std::str::from_utf8(&line_buf)
+        .map_err(|_| io::Error::new(ErrorKind::Other, "header line is not valid US-ASCII"))?;
 
       if line == "\r\n" {
         break;
@@ -232,31 +254,64 @@ impl Request {
         let line_without_crlf = &line[0..line.len() - 2];
         let mut line_parts = line_without_crlf.splitn(2, ':');
         headers.add(
-          HeaderType::from(line_parts.next().ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Malformed http header name"))?),
-          line_parts.next().ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Malformed http header value"))?.trim_start(),
+          HeaderType::from(
+            line_parts.next().ok_or_else(|| {
+              io::Error::new(ErrorKind::InvalidData, "Malformed http header name")
+            })?,
+          ),
+          line_parts
+            .next()
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Malformed http header value"))?
+            .trim_start(),
         );
       }
     }
 
     //This is user logic. TODO remove
-    let address = Address::from_headers(&headers, address).map_err(|_| io::Error::new(ErrorKind::Other, "Address::from_headers"))?;
+    let address = Address::from_headers(&headers, address)
+      .map_err(|_| io::Error::new(ErrorKind::Other, "Address::from_headers"))?;
 
     if version == HttpVersion::Http11 {
       //Http 1.0 does not have this.
       match headers.get(&HeaderType::TransferEncoding) {
         Some("chunked") => {
           let body = RequestBody::new_chunked(stream.new_ref_read());
-          return Ok(Self { method, path: uri, query, version, headers, body: Some(body), address, status_line });
+          return Ok(Self {
+            method,
+            path: uri,
+            query,
+            version,
+            headers,
+            body: Some(body),
+            address,
+            status_line,
+          });
         }
-        Some(other) => return Err(io::Error::new(ErrorKind::InvalidData, format!("Request Transfer-Encoding {other} is not supported"))),
+        Some(other) => {
+          return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("Request Transfer-Encoding {other} is not supported"),
+          ))
+        }
         None => {}
       }
     }
 
     if let Some(content_length) = headers.get(&HeaderType::ContentLength) {
-      let content_length: u64 = content_length.parse().map_err(|_| io::Error::new(ErrorKind::InvalidData, "Failed to parse content length header value"))?;
+      let content_length: u64 = content_length.parse().map_err(|_| {
+        io::Error::new(ErrorKind::InvalidData, "Failed to parse content length header value")
+      })?;
       let body = RequestBody::new_with_content_length(stream.new_ref_read(), content_length);
-      return Ok(Self { method, path: uri, query, version, headers, body: Some(body), address, status_line });
+      return Ok(Self {
+        method,
+        path: uri,
+        query,
+        version,
+        headers,
+        body: Some(body),
+        address,
+        status_line,
+      });
     }
 
     //TODO handle as is body with no content length. The stream needs to eof for the request body to end.

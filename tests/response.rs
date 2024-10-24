@@ -6,10 +6,10 @@ use humpty::http::response::Response;
 use humpty::http::status::StatusCode;
 use mock_stream::MockStream;
 
+use humpty::http::request::HttpVersion;
 use humpty::http::response_body::{ResponseBody, ResponseBodySink};
 use humpty::stream::IntoConnectionStream;
 use std::time::Duration;
-use humpty::http::request::HttpVersion;
 
 #[test]
 fn test_response() {
