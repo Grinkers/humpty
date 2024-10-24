@@ -75,6 +75,16 @@ impl Response {
     Self {status_code, headers: Headers::new(), body: None }
   }
 
+  /// HTTP 200 OK with body.
+  pub fn ok(bytes: ResponseBody) -> Self {
+    Self::empty(StatusCode::OK).with_body(bytes)
+  }
+
+  /// HTTP 404 without body
+  pub fn not_found() -> Self {
+    Self::empty(StatusCode::NotFound)
+  }
+
   /// Creates a redirect response to the given location.
   pub fn redirect<T>(location: T) -> Self
   where
