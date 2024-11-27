@@ -95,3 +95,8 @@ required-features = ["extras", "log"]
 name = "unix"
 path = "examples/unix.rs"
 required-features = ["extras", "log"]
+
+[[example]]
+name = "websocket_app"
+path = "examples/websocket_app.rs"
+required-features = ["extras"]

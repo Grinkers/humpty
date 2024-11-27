@@ -28,3 +28,7 @@ mod tls_unix_connector;
 #[cfg(feature = "tls")]
 #[cfg(unix)]
 pub use tls_unix_connector::*;
+
+/// Websocket application that spawns 2 threads per connection.
+/// It conveniently handles the WS Heartbeats and broadcasts.
+pub mod websocket_app;
