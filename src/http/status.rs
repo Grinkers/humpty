@@ -271,7 +271,7 @@ impl StatusCode {
       StatusCode::Gone => "Gone",
       StatusCode::LengthRequired => "Length Required",
       StatusCode::PreconditionFailed => "Precondition Failed",
-      #[allow(deprecated)]
+      #[expect(deprecated)]
       StatusCode::RequestEntityTooLarge => "Request Entity Too Large",
       StatusCode::ContentTooLarge => "Content Too Large",
       StatusCode::RequestURITooLong => "Request-URI Too Long",
@@ -322,7 +322,7 @@ impl StatusCode {
       StatusCode::Gone => "Gone",
       StatusCode::LengthRequired => "Length Required",
       StatusCode::PreconditionFailed => "Precondition Failed",
-      #[allow(deprecated)]
+      #[expect(deprecated)]
       StatusCode::RequestEntityTooLarge => "Request Entity Too Large",
       StatusCode::ContentTooLarge => "Content Too Large",
       StatusCode::RequestURITooLong => "Request-URI Too Long",
@@ -375,7 +375,7 @@ impl StatusCode {
       StatusCode::Gone => b"410",
       StatusCode::LengthRequired => b"411",
       StatusCode::PreconditionFailed => b"412",
-      #[allow(deprecated)]
+      #[expect(deprecated)]
       StatusCode::RequestEntityTooLarge => b"413",
       StatusCode::ContentTooLarge => b"413",
       StatusCode::RequestURITooLong => b"414",
@@ -426,7 +426,7 @@ impl StatusCode {
       StatusCode::Gone => 410,
       StatusCode::LengthRequired => 411,
       StatusCode::PreconditionFailed => 412,
-      #[allow(deprecated)]
+      #[expect(deprecated)]
       StatusCode::RequestEntityTooLarge => 413,
       StatusCode::ContentTooLarge => 413,
       StatusCode::RequestURITooLong => 414,

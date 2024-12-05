@@ -270,7 +270,7 @@ impl RequestHead {
       return Err(HumptyError::from(RequestHeadParsingError::StatusLineTooManyWhitespaces));
     }
 
-    let raw_path = uri_iter.next().unwrap();
+    let raw_path = unwrap_some(uri_iter.next());
 
     let path = urlencoding::decode(raw_path)
       .map_err(|_| {

@@ -31,7 +31,7 @@ struct UnixConnectorInner {
 }
 
 impl UnixConnectorInner {
-  #[allow(unsafe_code)]
+  #[expect(unsafe_code)]
   fn shutdown(&self) {
     if self.shutdown_flag.swap(true, Ordering::SeqCst) {
       return;

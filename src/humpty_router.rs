@@ -534,7 +534,7 @@ fn websocket_handshake(request: &RequestContext) -> HumptyResult<Response> {
 }
 
 impl HumptyRouter {
-  #[allow(clippy::too_many_arguments)] //Only called by the builder.
+  #[expect(clippy::too_many_arguments)] //Only called by the builder.
   pub(crate) fn new(
     router_filter: Box<dyn RouterFilter>,
     pre_routing_filters: Vec<Box<dyn RequestFilter>>,

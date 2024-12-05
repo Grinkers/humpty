@@ -72,7 +72,7 @@ impl Default for Hooks {
 }
 
 impl HumptyServer {
-  #[allow(clippy::too_many_arguments)] //Builder
+  #[expect(clippy::too_many_arguments)] //Builder
   pub(crate) fn new(
     routers: Vec<Box<dyn Router>>,
     error_handler: ErrorHandler,
