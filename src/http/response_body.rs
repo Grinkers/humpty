@@ -107,11 +107,11 @@ impl ResponseBody {
             return Ok(());
           }
 
-          if read > io_buf.len() {
-            return Err(io::Error::new(io::ErrorKind::Other, "buffer overflow"));
-          }
-
-          stream.write_all(&io_buf[..read])?;
+          stream.write_all(
+            io_buf
+              .get_mut(..read)
+              .ok_or(io::Error::new(io::ErrorKind::Other, "buffer overflow"))?,
+          )?;
           written = written
             .checked_add(
               u64::try_from(read)

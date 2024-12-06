@@ -115,7 +115,7 @@ fn try_find_path(directory: &str, request_path: &str, index_files: &[&str]) -> O
       let path = format!("{}/{}{}", directory, request_path, *filename);
       if let Ok(meta) = metadata(&path) {
         if meta.is_file() {
-          return Some(LocatedPath::File(PathBuf::from(path).canonicalize().unwrap()));
+          return Some(LocatedPath::File(PathBuf::from(path).canonicalize().ok()?));
         }
       }
     }
@@ -124,7 +124,7 @@ fn try_find_path(directory: &str, request_path: &str, index_files: &[&str]) -> O
 
     if let Ok(meta) = metadata(&path) {
       if meta.is_file() {
-        return Some(LocatedPath::File(PathBuf::from(path).canonicalize().unwrap()));
+        return Some(LocatedPath::File(PathBuf::from(path).canonicalize().ok()?));
       } else if meta.is_dir() {
         return Some(LocatedPath::Directory);
       }

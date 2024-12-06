@@ -128,6 +128,7 @@ impl Debug for RequestBodyChunked {
 }
 
 impl RequestBodyChunked {
+  #[expect(clippy::indexing_slicing, reason = "we break if n >= 17")]
   fn read_internal(&mut self, buf: &mut [u8]) -> io::Result<usize> {
     if buf.is_empty() {
       return Ok(0);

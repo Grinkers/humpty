@@ -30,7 +30,7 @@ struct TcpConnectorInner {
 
 impl TcpConnectorInner {
   #[cfg(target_os = "windows")]
-  #[allow(unsafe_code)]
+  #[expect(unsafe_code)]
   fn next(&self) -> io::Result<TcpStream> {
     use std::os::windows::io::AsRawSocket;
     use windows_sys::Win32::Networking::WinSock::{
@@ -196,7 +196,7 @@ impl TcpConnectorInner {
 }
 
 impl TcpConnectorInner {
-  #[allow(unsafe_code)]
+  #[expect(unsafe_code)]
   #[cfg(unix)]
   fn shutdown(&self) {
     use std::os::fd::AsRawFd;

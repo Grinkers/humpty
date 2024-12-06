@@ -296,7 +296,7 @@ impl Read for WebsocketReceiver {
         Ok(Some(message)) => match message.bytes() {
           Some(bytes) => {
             if bytes.len() <= buf.len() {
-              buf[..bytes.len()].copy_from_slice(bytes);
+              unwrap_some(buf.get_mut(..bytes.len())).copy_from_slice(bytes);
               Ok(bytes.len())
             } else {
               self.cursor = Cursor::new(bytes.to_vec());

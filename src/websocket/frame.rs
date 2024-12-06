@@ -2,6 +2,7 @@
 
 use crate::humpty_error::{HumptyResult, RequestHeadParsingError};
 use crate::stream::{ConnectionStreamRead, ConnectionStreamWrite};
+use crate::util;
 
 /// Represents a frame of WebSocket data.
 /// Follows [Section 5.2 of RFC 6455](https://datatracker.ietf.org/doc/html/rfc6455#section-5.2)
@@ -115,7 +116,11 @@ impl Frame {
     stream.read_exact(&mut payload)?;
 
     // Unmask the payload
-    payload.iter_mut().enumerate().for_each(|(i, tem)| *tem ^= masking_key[i % 4]);
+    payload
+      .iter_mut()
+      .enumerate()
+      // n % 4 is always 0-3
+      .for_each(|(i, tem)| *tem ^= util::unwrap_some(masking_key.get(i % 4)));
 
     Ok(Self { fin, rsv, opcode, mask, length, masking_key, payload })
   }

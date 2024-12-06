@@ -80,7 +80,7 @@ impl Headers {
       return None;
     }
 
-    Some(self.0[unwrap_some(found)].value.as_str())
+    Some(self.0.get(unwrap_some(found))?.value.as_str())
   }
 
   /// Replaces all header values with a single header.
