@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
-use std::{thread, time::Duration};
+use std::{io, thread, time::Duration};
 
 use crate::http::request_context::RequestContext;
 use crate::websocket::message::WebsocketMessage;
@@ -26,10 +26,12 @@ pub fn ws_link_hook(
 /// Top level Error for why `run` ran into a fatal crash.
 /// Use the `log` feature for debugging/tracing errors (eg. a WS client disconnecting).
 pub enum AppError {
-  /// Broadcast thread panic
-  BroadcastThread,
-  /// Exec thread panic
-  ExecThread,
+  /// Broadcast thread unexpected exit
+  BroadcastThread(Result<(), io::Error>),
+  /// Exec thread unexpected exit
+  ExecThread(Result<(), io::Error>),
+  /// Panic, use `log` feature to debug
+  Panic,
 }
 
 /// WebSocketApp builder/linker for setup and linking to Humpty
@@ -228,34 +230,37 @@ impl App {
 
     // broadcast/heartbeat thread
     let sd_flag = self.state.shutdown_flag.clone();
-    let broadcast_thread = thread::spawn(move || loop {
-      if sd_flag.load(Ordering::SeqCst) {
-        break;
-      }
-      let recv = self.state.outgoing_broadcasts.recv_timeout(timeout);
+    let broadcast_thread = thread::spawn(move || {
+      loop {
+        if sd_flag.load(Ordering::SeqCst) {
+          break;
+        }
+        let recv = self.state.outgoing_broadcasts.recv_timeout(timeout);
 
-      // Remove up to one idx per broadcast. They should eventually all be cleaned up because of the heartbeat.
-      let mut remove_idx = None;
-      match recv {
-        Ok(message) => {
-          let mut streams = streams.lock().expect("stream poisoned");
-          for (idx, stream) in streams.iter_mut().enumerate() {
-            // convert the broadcast back to message, but for each sender
-            if stream.send(OutgoingMessage::Message(message.clone())).is_err() {
-              remove_idx = Some(idx);
+        // Remove up to one idx per broadcast. They should eventually all be cleaned up because of the heartbeat.
+        let mut remove_idx = None;
+        match recv {
+          Ok(message) => {
+            let mut streams = util::unwrap_poison(streams.lock())?;
+            for (idx, stream) in streams.iter_mut().enumerate() {
+              // convert the broadcast back to message, but for each sender
+              if stream.send(OutgoingMessage::Message(message.clone())).is_err() {
+                remove_idx = Some(idx);
+              }
             }
           }
+          // the WebSocketApp has closed
+          Err(mpsc::RecvTimeoutError::Disconnected) => break,
+          Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-        // the WebSocketApp has closed
-        Err(mpsc::RecvTimeoutError::Disconnected) => break,
-        Err(mpsc::RecvTimeoutError::Timeout) => {}
-      }
-      if let Some(idx) = remove_idx {
-        let mut streams = streams.lock().expect("stream poisoned");
-        if streams.len() > idx {
-          streams.remove(idx);
+        if let Some(idx) = remove_idx {
+          let mut streams = util::unwrap_poison(streams.lock())?;
+          if streams.len() > idx {
+            streams.remove(idx);
+          }
         }
       }
+      Ok::<(), io::Error>(())
     });
 
     let sd_flag = self.state.shutdown_flag.clone();
@@ -283,7 +288,7 @@ impl App {
 
         let sender = self.state.broadcast_sender.clone();
         let (message_sender, outgoing_messages) = channel();
-        self.state.send_streams.lock().expect("send_stream poisoned").push(message_sender.clone());
+        util::unwrap_poison(self.state.send_streams.lock())?.push(message_sender.clone());
 
         let connect_handler = connect_handler.clone();
         let disconnect_handler = disconnect_handler.clone();
@@ -314,20 +319,31 @@ impl App {
           warn_log!("{:?} while doing join of `exec` thread.", e);
         }
       }
+      Ok::<(), io::Error>(())
     });
 
     // monitor for unexpected thread exits, log, and report the AppError
-    'outer: loop {
+    loop {
       if self.state.shutdown_flag.load(Ordering::SeqCst) {
-        break 'outer;
+        break;
       }
       if exec_thread.is_finished() {
-        error_log!("Unexpected exec_thread exit/panic.");
-        return Err(AppError::ExecThread);
+        return match exec_thread.join() {
+          Ok(et) => Err(AppError::ExecThread(et)),
+          Err(e) => {
+            error_log!("Unexpected exec_thread panic: {:?}.", e);
+            Err(AppError::Panic)
+          }
+        };
       }
       if broadcast_thread.is_finished() {
-        error_log!("Unexpected breadcast_thread exit/panic.");
-        return Err(AppError::BroadcastThread);
+        return match exec_thread.join() {
+          Ok(bt) => Err(AppError::BroadcastThread(bt)),
+          Err(e) => {
+            error_log!("Unexpected broadcast_thread panic: {:?}.", e);
+            Err(AppError::Panic)
+          }
+        };
       }
 
       thread::sleep(timeout);
@@ -335,12 +351,12 @@ impl App {
 
     if let Err(e) = exec_thread.join() {
       error_log!("{:?} while doing join of `exec` thread.", e);
-      return Err(AppError::ExecThread);
+      return Err(AppError::Panic);
     }
 
     if let Err(e) = broadcast_thread.join() {
       error_log!("{:?} while doing join of `exec` thread.", e);
-      return Err(AppError::BroadcastThread);
+      return Err(AppError::Panic);
     }
     Ok(())
   }
