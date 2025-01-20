@@ -433,7 +433,7 @@ fn exec(es: ExecState) {
   });
 
   // read thread
-  loop {
+  let read_thread = thread::spawn(move || loop {
     if es.shutdown_signal.load(Ordering::SeqCst) {
       break;
     }
@@ -443,7 +443,7 @@ fn exec(es: ExecState) {
         ReadMessageTimeoutResult::Message(m) => {
           match m {
             WebsocketMessage::Binary(_) | WebsocketMessage::Text(_) => {
-              (mh)(WsHandle::new(addr.clone(), es.message_sender.clone()), m)
+              (mh)(WsHandle::new(addr.clone(), es.message_sender.clone()), m);
             }
             WebsocketMessage::Ping => {
               if es.message_sender.send(OutgoingMessage::Message(WebsocketMessage::Pong)).is_err() {
@@ -463,11 +463,11 @@ fn exec(es: ExecState) {
         break;
       }
     }
+  });
+
+  if let Err(e) = read_thread.join() {
+    error_log!("ws_app read: {:?} occurred", &e);
   }
-
-  drop(es.message_sender);
-
-  info_log!("ws_app: waiting for write thread to finish");
   if let Err(e) = write_thread.join() {
     error_log!("ws_app read: {:?} occurred", &e);
   }
