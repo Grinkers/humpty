@@ -100,6 +100,6 @@ path = "examples/unix.rs"
 required-features = ["extras", "log"]
 
 [[example]]
-name = "websocket_app"
-path = "examples/websocket_app.rs"
+name = "websocket_broadcast"
+path = "examples/websocket_broadcast.rs"
 required-features = ["extras"]

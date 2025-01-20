@@ -35,7 +35,7 @@ pub enum AppError {
 }
 
 /// WebSocketApp builder/linker for setup and linking to Humpty
-pub struct WsLinker {
+pub struct WsBroadcastBuilder {
   humpty_link: Arc<Mutex<Sender<WebsocketContext>>>,
   state: State,
 }
@@ -132,7 +132,7 @@ impl<T> EventHandler for T where T: Fn(WsHandle) + Send + Sync + 'static {}
 pub trait MessageHandler: Fn(WsHandle, WebsocketMessage) + Send + Sync + 'static {}
 impl<T> MessageHandler for T where T: Fn(WsHandle, WebsocketMessage) + Send + Sync + 'static {}
 
-impl Default for WsLinker {
+impl Default for WsBroadcastBuilder {
   fn default() -> Self {
     let (connect_hook, incoming_streams) = channel();
     let (broadcast_sender, outgoing_broadcasts) = channel();
@@ -155,7 +155,7 @@ impl Default for WsLinker {
   }
 }
 
-impl WsLinker {
+impl WsBroadcastBuilder {
   /// Returns the finalized App.
   pub fn finalize(self) -> App {
     App { state: self.state }

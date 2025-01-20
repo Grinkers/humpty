@@ -16,8 +16,8 @@ pub use tcp_connector::*;
 
 /// Websocket application that spawns 2 threads per connection.
 /// It conveniently handles the WS Heartbeats and broadcasts.
-mod websocket_app;
-pub use websocket_app::*;
+mod websocket_broadcaster;
+pub use websocket_broadcaster::*;
 
 #[cfg(feature = "tls")]
 mod tls_tcp_connector;

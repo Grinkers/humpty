@@ -2,12 +2,12 @@ use std::error::Error;
 use std::thread::{self, spawn};
 use std::time::Duration;
 
-use humpty::extras::{ws_link_hook, Connector, TcpConnector, WsHandle, WsLinker};
+use humpty::extras::{ws_link_hook, Connector, TcpConnector, WsBroadcastBuilder, WsHandle};
 use humpty::humpty_builder::HumptyBuilder;
 use humpty::websocket::message::WebsocketMessage;
 
 fn main() -> Result<(), Box<dyn Error>> {
-  let websocket_linker = WsLinker::default()
+  let websocket_linker = WsBroadcastBuilder::default()
     .with_message_handler(message_handler)
     .with_connect_handler(connect_handler)
     .with_disconnect_handler(disconnect_handler);
