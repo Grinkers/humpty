@@ -64,7 +64,9 @@ fn connect_handler(handle: WsHandle) {
 }
 
 fn disconnect_handler(handle: WsHandle) {
-  println!("{}: Client disconnected", handle.peer_addr());
+  let msg = format!("{}: Client disconnected", handle.peer_addr());
+  println!("{msg}");
+  handle.broadcast(WebsocketMessage::new_text(&msg));
 }
 
 fn fizzbuzz(s: &str) -> &str {

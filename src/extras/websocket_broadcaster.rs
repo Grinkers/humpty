@@ -453,7 +453,12 @@ fn exec(es: ExecState) {
             WebsocketMessage::Pong => (), // do nothing
           }
         }
-        ReadMessageTimeoutResult::Timeout | ReadMessageTimeoutResult::Closed => break,
+        ReadMessageTimeoutResult::Timeout | ReadMessageTimeoutResult::Closed => {
+          if let Some(dh) = es.disconnect_handler {
+            (dh)(WsHandle::new(addr.clone(), es.message_sender.clone()));
+          }
+          break;
+        }
       },
       Err(e) => {
         error_log!("ws_app read: {:?} occurred", &e);
