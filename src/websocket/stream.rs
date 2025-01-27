@@ -107,6 +107,7 @@ impl WebsocketSender {
 }
 
 /// Receiving side of a web socket
+#[derive(Debug)]
 pub struct WebsocketReceiver {
   guard: Arc<WebSocketGuard>,
   state: Vec<Frame>,
@@ -115,6 +116,7 @@ pub struct WebsocketReceiver {
 }
 
 /// Return enum for the fn WebsocketReceiver::read_message_timeout
+#[derive(Debug)]
 pub enum ReadMessageTimeoutResult {
   /// We got a message without running into any timeout
   Message(WebsocketMessage),
