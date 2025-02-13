@@ -55,7 +55,7 @@ jobs:
       - name: 64-bit Valgrind
         run: |
           cargo build --examples --features extras,log
-          valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all target/debug/examples/shutdown
+          valgrind --errors-for-leak-kinds=all --error-exitcode=1 --leak-check=full --show-leak-kinds=all target/debug/examples/shutdown
           valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all target/debug/examples/shutdown_unix
           valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all target/debug/examples/shutdown_multiple
           valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all target/debug/examples/websocket_broadcast 5
